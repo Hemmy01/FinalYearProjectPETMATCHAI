@@ -373,17 +373,6 @@ export default function NewListingPage() {
           <p className="text-xs text-gray-400 mt-1">{description.length} characters</p>
         </section>
 
-        {/* Verification notice */}
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3">
-          <span className="text-xl shrink-0">🔐</span>
-          <div>
-            <p className="text-sm font-semibold text-amber-800">Listing verification required</p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              After publishing, you'll be asked to photograph your pet holding a unique code card. This proves the pet is real and in your possession — buyers trust verified listings more.
-            </p>
-          </div>
-        </div>
-
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
             {error}
