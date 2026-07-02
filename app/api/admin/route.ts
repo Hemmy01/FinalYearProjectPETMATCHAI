@@ -138,20 +138,41 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ success: true, data })
   }
 
-  if (body.type === "suspendUser") {
+  // Suspend (reversible), permanently disable, or reactivate an account.
+  // "suspendUser" is kept as an alias for backward compatibility.
+  if (body.type === "suspendUser" || body.type === "setUserStatus") {
+    const userId = body.userId as string
+    const status = body.type === "suspendUser" ? "suspended" : (body.status as string)
+    if (!userId || !["active", "suspended", "disabled"].includes(status)) {
+      return NextResponse.json({ error: "Invalid status" }, { status: 400 })
+    }
+    if (userId === admin.id) {
+      return NextResponse.json({ error: "You cannot change your own account status." }, { status: 400 })
+    }
+    // Protect other administrators from being locked out.
+    const { data: target } = await db.from("profiles").select("role").eq("id", userId).single()
+    if (target?.role === "administrator") {
+      return NextResponse.json({ error: "Administrator accounts cannot be suspended." }, { status: 403 })
+    }
+    // Ban (or unban) at the Supabase Auth level so the account genuinely cannot
+    // sign in or refresh its session. ~100 years ≈ permanent; "none" lifts it.
+    const banDuration = status === "active" ? "none" : "876000h"
+    const { error: banErr } = await db.auth.admin.updateUserById(userId, { ban_duration: banDuration })
+    if (banErr) return NextResponse.json({ error: banErr.message }, { status: 500 })
+    // Persist the moderation status on the profile.
     const { data, error } = await db
       .from("profiles")
-      .update({ is_verified: false })
-      .eq("id", body.userId)
+      .update({ status })
+      .eq("id", userId)
       .select()
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     await db.from("audit_logs").insert({
       user_id: admin.id,
-      action: "suspend_user",
+      action: status === "active" ? "reactivate_user" : status === "disabled" ? "disable_user" : "suspend_user",
       entity_type: "profile",
-      entity_id: body.userId,
-      details: {},
+      entity_id: userId,
+      details: { status },
     })
     return NextResponse.json({ success: true, data })
   }

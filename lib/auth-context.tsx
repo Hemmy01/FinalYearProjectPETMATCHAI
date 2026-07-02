@@ -15,6 +15,7 @@ export interface AuthUser {
   avatar_url?: string
   is_verified?: boolean
   onboarded?: boolean
+  status?: "active" | "suspended" | "disabled"
 }
 
 interface AuthCtx {
@@ -47,6 +48,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loadProfile(userId: string) {
     const { data } = await supabase.from("profiles").select("*").eq("id", userId).single()
     if (data) {
+      // Suspended/disabled accounts must not retain access — force a sign-out.
+      if (data.status === "suspended" || data.status === "disabled") {
+        await supabase.auth.signOut()
+        setUser(null)
+        setSession(null)
+        return
+      }
       setUser({
         id: data.id,
         name: data.name,
@@ -56,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         location: data.location ?? undefined,
         avatar_url: data.avatar_url ?? undefined,
         is_verified: data.is_verified,
+        status: data.status ?? "active",
         // If the column doesn't exist yet (migration not run), treat as onboarded
         // so existing email/password users are never forced into role selection.
         onboarded: data.onboarded ?? true,
@@ -108,7 +117,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ email, succeeded: !error }),
     }).catch(() => {})
 
-    if (error) return { error: error.message }
+    if (error) {
+      if (error.message.toLowerCase().includes("banned")) {
+        return { error: "Your account has been suspended. Please contact support." }
+      }
+      return { error: error.message }
+    }
+
+    // Guard against a suspended/disabled account that still has a valid session.
+    const { data: { user: u } } = await supabase.auth.getUser()
+    if (u) {
+      const { data: prof } = await supabase.from("profiles").select("status").eq("id", u.id).single()
+      if (prof?.status === "suspended" || prof?.status === "disabled") {
+        await supabase.auth.signOut()
+        return { error: "Your account has been suspended. Please contact support." }
+      }
+    }
     return {}
   }
 

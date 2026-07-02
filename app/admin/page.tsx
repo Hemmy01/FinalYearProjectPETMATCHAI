@@ -9,7 +9,7 @@ import { api } from "@/lib/api-client";
 const tabs = ["Overview", "Users", "Listings", "Verifications", "Reviews", "AI System", "Audit Log", "Disputes", "Categories"] as const;
 type Tab = typeof tabs[number];
 
-type UserRow = { id: string; name: string; email: string; role: string; location: string; is_verified: boolean; created_at: string };
+type UserRow = { id: string; name: string; email: string; role: string; location: string; is_verified: boolean; status?: string; created_at: string };
 type PetRow = { id: string; name: string; breed: string; price: number; status: string; seller: { name: string } | null };
 type AuditRow = { id: string; action: string; entity_type: string; created_at: string; user: { name: string; email: string } | null; details: Record<string, unknown> };
 type DisputeRow = { id: string; subject: string; description: string; status: string; created_at: string; reporter: { name: string; email: string } | null; respondent: { name: string; email: string } | null };
@@ -111,9 +111,13 @@ export default function AdminPage() {
 
   async function doAction(fn: () => Promise<void>, successMsg: string) {
     setActionMsg("");
-    await fn();
-    setActionMsg(successMsg);
-    setTimeout(() => setActionMsg(""), 3000);
+    try {
+      await fn();
+      setActionMsg(successMsg);
+    } catch (e) {
+      setActionMsg(`Error: ${e instanceof Error ? e.message : "Action failed"}`);
+    }
+    setTimeout(() => setActionMsg(""), 4000);
   }
 
   async function changeListingStatus(petId: string, status: string) {
@@ -121,9 +125,10 @@ export default function AdminPage() {
     setPets((prev) => prev.map((p) => p.id === petId ? { ...p, status } : p));
   }
 
-  async function suspendUser(userId: string) {
-    await api.patch("/api/admin", { type: "suspendUser", userId });
-    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, is_verified: false } : u));
+  async function setUserStatus(userId: string, status: "active" | "suspended" | "disabled") {
+    const res = await api.patch("/api/admin", { type: "setUserStatus", userId, status });
+    if (res.error) throw new Error(res.error);
+    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status } : u));
   }
 
   async function changeRole(userId: string, role: string) {
@@ -312,12 +317,13 @@ export default function AdminPage() {
                   <th className="text-left px-4 py-3">Role</th>
                   <th className="text-left px-4 py-3">Location</th>
                   <th className="text-left px-4 py-3">Verified</th>
+                  <th className="text-left px-4 py-3">Status</th>
                   <th className="text-left px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {users.length === 0 ? (
-                  <tr><td colSpan={5} className="text-center py-6 text-gray-400 text-sm">No users found.</td></tr>
+                  <tr><td colSpan={6} className="text-center py-6 text-gray-400 text-sm">No users found.</td></tr>
                 ) : users.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
@@ -340,12 +346,41 @@ export default function AdminPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {u.id !== user.id && (
-                        <button
-                          onClick={() => doAction(() => suspendUser(u.id), "User suspended.")}
-                          className="text-xs text-red-500 hover:underline">
-                          Suspend
-                        </button>
+                      {(() => {
+                        const st = u.status ?? "active";
+                        const styles: Record<string, string> = {
+                          active: "bg-green-100 text-green-700",
+                          suspended: "bg-amber-100 text-amber-700",
+                          disabled: "bg-red-100 text-red-700",
+                        };
+                        return <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${styles[st]}`}>{st}</span>;
+                      })()}
+                    </td>
+                    <td className="px-4 py-3">
+                      {u.id !== user.id && u.role !== "administrator" && (
+                        <div className="flex items-center gap-3">
+                          {(u.status ?? "active") === "active" && (
+                            <button
+                              onClick={() => doAction(() => setUserStatus(u.id, "suspended"), "User suspended — they can no longer sign in.")}
+                              className="text-xs text-amber-600 hover:underline">
+                              Suspend
+                            </button>
+                          )}
+                          {(u.status ?? "active") !== "active" && (
+                            <button
+                              onClick={() => doAction(() => setUserStatus(u.id, "active"), "User reactivated.")}
+                              className="text-xs text-green-600 hover:underline">
+                              Reactivate
+                            </button>
+                          )}
+                          {(u.status ?? "active") !== "disabled" && (
+                            <button
+                              onClick={() => { if (confirm(`Permanently disable ${u.name ?? u.email}? They will be banned from signing in. You can still reactivate later if needed.`)) doAction(() => setUserStatus(u.id, "disabled"), "Account permanently disabled."); }}
+                              className="text-xs text-red-500 hover:underline">
+                              Disable
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>
