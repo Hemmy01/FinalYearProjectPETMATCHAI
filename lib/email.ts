@@ -82,6 +82,31 @@ export function emailWeeklyReport(
   )
 }
 
+export function emailAccountStatus(
+  email: string,
+  name: string | null,
+  status: "suspended" | "disabled" | "active"
+) {
+  const hi = name ? `Hi ${name},` : "Hi,"
+  if (status === "active") {
+    return sendEmail(
+      email,
+      "Your PetMatchAI account has been reactivated",
+      `<p style="color:#111827;font-size:16px;margin:0 0 12px">${hi}</p>
+       <p style="color:#374151;font-size:14px;margin:0 0 18px">Good news — your PetMatchAI account has been <strong style="color:#059669">reactivated</strong>. You can now sign in and continue using the platform.</p>
+       <a href="https://petmatchai.vercel.app/auth/login" style="background:#059669;color:white;padding:10px 20px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600">Sign in</a>`
+    )
+  }
+  const disabled = status === "disabled"
+  return sendEmail(
+    email,
+    `Your PetMatchAI account has been ${disabled ? "disabled" : "suspended"}`,
+    `<p style="color:#111827;font-size:16px;margin:0 0 12px">${hi}</p>
+     <p style="color:#374151;font-size:14px;margin:0 0 16px">Your PetMatchAI account has been <strong style="color:#b91c1c">${disabled ? "permanently disabled" : "suspended"}</strong>${disabled ? " following a violation of our community guidelines" : ""}. ${disabled ? "You will no longer be able to sign in." : "You won’t be able to sign in until it is reactivated."}</p>
+     <p style="color:#6b7280;font-size:13px;margin:0">If you believe this was a mistake, please reply to this email to contact our support team.</p>`
+  )
+}
+
 export function emailOfferAccepted(buyerEmail: string, petName: string, amount: number) {
   return sendEmail(
     buyerEmail,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient, verifyToken } from "@/lib/supabase"
+import { emailAccountStatus } from "@/lib/email"
 
 async function requireAdmin(token: string | null) {
   if (!token) return null
@@ -150,7 +151,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "You cannot change your own account status." }, { status: 400 })
     }
     // Protect other administrators from being locked out.
-    const { data: target } = await db.from("profiles").select("role").eq("id", userId).single()
+    const { data: target } = await db.from("profiles").select("role, email, name").eq("id", userId).single()
     if (target?.role === "administrator") {
       return NextResponse.json({ error: "Administrator accounts cannot be suspended." }, { status: 403 })
     }
@@ -167,6 +168,33 @@ export async function PATCH(req: NextRequest) {
       .select()
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    // Let the affected user know — in-app notification + email.
+    const notice = {
+      suspended: {
+        title: "Your account has been suspended",
+        message: "Your PetMatchAI account has been suspended and you can no longer sign in. If you believe this is a mistake, please contact support.",
+      },
+      disabled: {
+        title: "Your account has been disabled",
+        message: "Your PetMatchAI account has been permanently disabled following a violation of our community guidelines. You can no longer sign in.",
+      },
+      active: {
+        title: "Your account has been reactivated",
+        message: "Good news — your PetMatchAI account has been reactivated. You can sign in and use the platform again.",
+      },
+    }[status as "suspended" | "disabled" | "active"]
+    await db.from("notifications").insert({
+      user_id: userId,
+      type: "system",
+      title: notice.title,
+      message: notice.message,
+      data: { status, by: admin.id },
+    })
+    if (target?.email) {
+      await emailAccountStatus(target.email, target.name ?? null, status as "suspended" | "disabled" | "active")
+    }
+
     await db.from("audit_logs").insert({
       user_id: admin.id,
       action: status === "active" ? "reactivate_user" : status === "disabled" ? "disable_user" : "suspend_user",
