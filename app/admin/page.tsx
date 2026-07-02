@@ -6,8 +6,17 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
 
-const tabs = ["Overview", "Users", "Listings", "Verifications", "Reviews", "AI System", "Audit Log", "Disputes", "Categories"] as const;
+const tabs = ["Overview", "Users", "Listings", "Verifications", "Reviews", "AI System", "Audit Log", "Disputes", "Payments", "Categories"] as const;
 type Tab = typeof tabs[number];
+
+type TxRow = { id: string; reference: string; amount: number; status: string; provider: string; created_at: string; buyer: { name: string; email: string } | null; seller: { name: string; email: string } | null; pet: { name: string } | null };
+const TX_STATUS_STYLES: Record<string, string> = {
+  pending: "bg-gray-100 text-gray-600",
+  paid_escrow: "bg-indigo-100 text-indigo-700",
+  released: "bg-green-100 text-green-700",
+  refunded: "bg-amber-100 text-amber-700",
+  cancelled: "bg-gray-100 text-gray-500",
+};
 
 type UserRow = { id: string; name: string; email: string; role: string; location: string; is_verified: boolean; status?: string; created_at: string };
 type PetRow = { id: string; name: string; breed: string; price: number; status: string; seller: { name: string } | null };
@@ -34,6 +43,7 @@ export default function AdminPage() {
   const [reviews, setReviews] = useState<any[]>([]);
   const [aiStats, setAiStats] = useState<any>(null);
   const [disputes, setDisputes] = useState<DisputeRow[]>([]);
+  const [transactions, setTransactions] = useState<TxRow[]>([]);
   const [categories, setCategories] = useState<{ species: { name: string; count: number }[]; breeds: { name: string; species: string; count: number }[] } | null>(null);
 
   const [flushingCache, setFlushingCache] = useState(false);
@@ -104,6 +114,9 @@ export default function AdminPage() {
     if (tab === "Disputes" && disputes.length === 0) {
       api.get("/api/admin?type=disputes").then((res) => setDisputes(res.data ?? []));
     }
+    if (tab === "Payments" && transactions.length === 0) {
+      api.get("/api/payments?admin=true").then((res) => setTransactions(res.data ?? []));
+    }
     if (tab === "Categories" && !categories) {
       api.get("/api/admin?type=categories").then((res) => setCategories(res.data ?? null));
     }
@@ -129,6 +142,12 @@ export default function AdminPage() {
     const res = await api.patch("/api/admin", { type: "setUserStatus", userId, status });
     if (res.error) throw new Error(res.error);
     setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status } : u));
+  }
+
+  async function refundTransaction(reference: string) {
+    const res = await api.post("/api/payments", { type: "refund", reference });
+    if (res.error) throw new Error(res.error);
+    setTransactions((prev) => prev.map((t) => t.reference === reference ? { ...t, status: "refunded" } : t));
   }
 
   async function changeRole(userId: string, role: string) {
@@ -895,6 +914,61 @@ export default function AdminPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Payments ── */}
+      {tab === "Payments" && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="p-4 border-b border-gray-100">
+            <p className="text-sm font-semibold text-gray-900">Escrow Payments</p>
+            <p className="text-xs text-gray-400 mt-0.5">Funds paid by buyers are held in escrow until handover is confirmed. Refund an escrowed payment to reverse it (e.g. after a dispute).</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs">
+                <tr>
+                  <th className="text-left px-4 py-3">Buyer → Seller</th>
+                  <th className="text-left px-4 py-3">Pet</th>
+                  <th className="text-left px-4 py-3">Amount</th>
+                  <th className="text-left px-4 py-3">Via</th>
+                  <th className="text-left px-4 py-3">Status</th>
+                  <th className="text-left px-4 py-3">Date</th>
+                  <th className="text-left px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {transactions.length === 0 ? (
+                  <tr><td colSpan={7} className="text-center py-6 text-gray-400 text-sm">No payments yet.</td></tr>
+                ) : transactions.map((t) => (
+                  <tr key={t.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <p className="text-gray-900">{t.buyer?.name ?? "—"} <span className="text-gray-400">→</span> {t.seller?.name ?? "—"}</p>
+                      <p className="text-[11px] text-gray-400">{t.reference}</p>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{t.pet?.name ?? "—"}</td>
+                    <td className="px-4 py-3 font-medium text-gray-900">₦{Number(t.amount).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500 capitalize">{t.provider}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${TX_STATUS_STYLES[t.status] ?? "bg-gray-100 text-gray-600"}`}>
+                        {t.status.replace("_", " ")}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-400">{timeAgo(t.created_at)}</td>
+                    <td className="px-4 py-3">
+                      {t.status === "paid_escrow" && (
+                        <button
+                          onClick={() => { if (confirm(`Refund ₦${Number(t.amount).toLocaleString()} to ${t.buyer?.name ?? "the buyer"}? This reverses the escrowed payment.`)) doAction(() => refundTransaction(t.reference), "Payment refunded."); }}
+                          className="text-xs text-amber-600 hover:underline">
+                          Refund
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

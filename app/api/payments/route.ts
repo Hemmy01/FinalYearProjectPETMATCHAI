@@ -9,10 +9,25 @@ export async function GET(req: NextRequest) {
   const { user } = await verifyToken(token)
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const offerId = new URL(req.url).searchParams.get("offerId")
+  const sp = new URL(req.url).searchParams
+  const db = createAdminClient()
+
+  // Admin: list all transactions for the Payments tab.
+  if (sp.get("admin") === "true") {
+    const { data: me } = await db.from("profiles").select("role").eq("id", user.id).single()
+    if (me?.role !== "administrator") return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    const { data, error } = await db
+      .from("transactions")
+      .select("*, buyer:profiles!transactions_buyer_id_fkey(name, email), seller:profiles!transactions_seller_id_fkey(name, email), pet:pets!transactions_pet_id_fkey(name)")
+      .order("created_at", { ascending: false })
+      .limit(200)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ data: data ?? [] })
+  }
+
+  const offerId = sp.get("offerId")
   if (!offerId) return NextResponse.json({ error: "offerId required" }, { status: 400 })
 
-  const db = createAdminClient()
   const { data } = await db
     .from("transactions")
     .select("*")
