@@ -50,7 +50,21 @@ export async function GET(req: NextRequest) {
       .order("created_at", { ascending: false })
       .limit(100)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ data: data ?? [] })
+
+    // Attach any refundable (escrowed) payment tied to each dispute's offer.
+    const disputes = data ?? []
+    const offerIds = disputes.map((d) => d.offer_id).filter(Boolean)
+    if (offerIds.length > 0) {
+      const { data: txs } = await db
+        .from("transactions")
+        .select("offer_id, reference, amount, status")
+        .in("offer_id", offerIds)
+        .eq("status", "paid_escrow")
+      const byOffer: Record<string, { reference: string; amount: number; status: string }> = {}
+      for (const t of txs ?? []) byOffer[t.offer_id] = { reference: t.reference, amount: Number(t.amount), status: t.status }
+      for (const d of disputes) d.escrow = d.offer_id ? byOffer[d.offer_id] ?? null : null
+    }
+    return NextResponse.json({ data: disputes })
   }
 
   if (type === "categories") {
@@ -222,8 +236,28 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (body.type === "resolveDispute") {
-    const { disputeId, resolution } = body
+    const { disputeId, resolution, refund } = body
     if (!disputeId || !resolution) return NextResponse.json({ error: "disputeId and resolution required" }, { status: 400 })
+
+    // Optionally refund the escrowed payment tied to this dispute's offer.
+    let refunded = false
+    if (refund) {
+      const { data: dispute } = await db.from("disputes").select("offer_id").eq("id", disputeId).single()
+      if (dispute?.offer_id) {
+        const { data: tx } = await db.from("transactions").select("*")
+          .eq("offer_id", dispute.offer_id).eq("status", "paid_escrow").maybeSingle()
+        if (tx) {
+          await db.from("transactions").update({ status: "refunded", updated_at: new Date().toISOString() }).eq("id", tx.id)
+          await db.from("pets").update({ status: "active" }).eq("id", tx.pet_id)
+          await db.from("notifications").insert([
+            { user_id: tx.buyer_id, type: "system", title: "Payment refunded", message: `Following a dispute, your escrow payment of ₦${Number(tx.amount).toLocaleString()} has been refunded.`, data: { transaction_id: tx.id, dispute_id: disputeId } },
+            { user_id: tx.seller_id, type: "system", title: "Escrow refunded", message: `An escrowed payment of ₦${Number(tx.amount).toLocaleString()} was refunded to the buyer following a dispute.`, data: { transaction_id: tx.id, dispute_id: disputeId } },
+          ])
+          refunded = true
+        }
+      }
+    }
+
     const { error } = await db
       .from("disputes")
       .update({
@@ -239,9 +273,9 @@ export async function PATCH(req: NextRequest) {
       action: "resolve_dispute",
       entity_type: "dispute",
       entity_id: disputeId,
-      details: { resolution: resolution.slice(0, 200) },
+      details: { resolution: resolution.slice(0, 200), refunded },
     })
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, refunded })
   }
 
   return NextResponse.json({ error: "Unknown type" }, { status: 400 })

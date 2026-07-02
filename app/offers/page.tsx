@@ -219,6 +219,7 @@ function DisputeForm({ offer, onDone }: { offer: Offer; onDone: () => void }) {
       : offer.seller_id;
     const res = await api.post("/api/disputes", {
       respondentId,
+      offerId: offer.id,
       subject: finalSubject,
       description: description.trim() || null,
       context: `Offer ID: ${offer.id} | Pet: ${offer.pet?.name ?? "—"} | Amount: ₦${Number(offer.amount).toLocaleString()}`,

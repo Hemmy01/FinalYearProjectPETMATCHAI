@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await req.json()
-  const { respondentId, subject, description, context } = body
+  const { respondentId, subject, description, context, offerId } = body
 
   if (!respondentId || !subject?.trim()) {
     return NextResponse.json({ error: "respondentId and subject are required" }, { status: 400 })
@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
     subject: subject.trim(),
     description: description?.trim() ?? null,
     context: context?.trim() ?? null,
+    offer_id: offerId ?? null,
     status: "pending",
   }).select().single()
 

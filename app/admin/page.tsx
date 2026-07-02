@@ -21,7 +21,7 @@ const TX_STATUS_STYLES: Record<string, string> = {
 type UserRow = { id: string; name: string; email: string; role: string; location: string; is_verified: boolean; status?: string; created_at: string };
 type PetRow = { id: string; name: string; breed: string; price: number; status: string; seller: { name: string } | null };
 type AuditRow = { id: string; action: string; entity_type: string; created_at: string; user: { name: string; email: string } | null; details: Record<string, unknown> };
-type DisputeRow = { id: string; subject: string; description: string; status: string; created_at: string; reporter: { name: string; email: string } | null; respondent: { name: string; email: string } | null };
+type DisputeRow = { id: string; subject: string; description: string; status: string; created_at: string; offer_id?: string | null; escrow?: { reference: string; amount: number; status: string } | null; reporter: { name: string; email: string } | null; respondent: { name: string; email: string } | null };
 
 function timeAgo(iso: string) {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -65,6 +65,7 @@ export default function AdminPage() {
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [resolutionText, setResolutionText] = useState("");
   const [resolutionSubmitting, setResolutionSubmitting] = useState(false);
+  const [refundOnResolve, setRefundOnResolve] = useState(false);
 
   // Categories search
   const [breedSearch, setBreedSearch] = useState("");
@@ -189,13 +190,14 @@ export default function AdminPage() {
   async function resolveDispute(disputeId: string) {
     if (!resolutionText.trim()) return;
     setResolutionSubmitting(true);
-    const res = await api.patch("/api/admin", { type: "resolveDispute", disputeId, resolution: resolutionText.trim() });
+    const res = await api.patch("/api/admin", { type: "resolveDispute", disputeId, resolution: resolutionText.trim(), refund: refundOnResolve });
     setResolutionSubmitting(false);
     if (!res.error) {
-      setDisputes((prev) => prev.map((d) => d.id === disputeId ? { ...d, status: "resolved" } : d));
+      setDisputes((prev) => prev.map((d) => d.id === disputeId ? { ...d, status: "resolved", escrow: res.refunded ? null : d.escrow } : d));
       setResolvingId(null);
       setResolutionText("");
-      doAction(async () => {}, "Dispute resolved.");
+      setRefundOnResolve(false);
+      doAction(async () => {}, res.refunded ? "Dispute resolved & buyer refunded." : "Dispute resolved.");
     }
   }
 
@@ -872,10 +874,13 @@ export default function AdminPage() {
                           <td className="px-4 py-3">
                             {d.status === "pending" && (
                               <button
-                                onClick={() => { setResolvingId(d.id); setResolutionText(""); }}
+                                onClick={() => { setResolvingId(d.id); setResolutionText(""); setRefundOnResolve(false); }}
                                 className="text-xs text-indigo-600 hover:underline font-medium">
                                 Resolve
                               </button>
+                            )}
+                            {d.escrow && (
+                              <span className="block mt-1 text-[10px] text-indigo-500 font-medium">🔒 ₦{d.escrow.amount.toLocaleString()} in escrow</span>
                             )}
                           </td>
                         </tr>
@@ -898,12 +903,18 @@ export default function AdminPage() {
                                     {resolutionSubmitting ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
                                     Mark Resolved
                                   </button>
-                                  <button onClick={() => setResolvingId(null)}
+                                  <button onClick={() => { setResolvingId(null); setRefundOnResolve(false); }}
                                     className="text-xs text-gray-500 hover:text-gray-700 text-center">
                                     Cancel
                                   </button>
                                 </div>
                               </div>
+                              {d.escrow && (
+                                <label className="flex items-center gap-2 mt-2.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 cursor-pointer">
+                                  <input type="checkbox" checked={refundOnResolve} onChange={(e) => setRefundOnResolve(e.target.checked)} className="accent-amber-600" />
+                                  Refund the buyer&apos;s escrow payment of <strong>₦{d.escrow.amount.toLocaleString()}</strong> as part of this resolution
+                                </label>
+                              )}
                             </td>
                           </tr>
                         )}
