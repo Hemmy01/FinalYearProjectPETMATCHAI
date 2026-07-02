@@ -5,6 +5,7 @@ import { Loader2, CheckCircle, XCircle, ArrowLeftRight, ChevronDown, ChevronUp, 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
+import PaymentPanel from "@/components/PaymentPanel";
 
 type Offer = {
   id: string;
@@ -497,9 +498,13 @@ export default function OffersPage() {
                   {!isSeller && offer.status === "accepted" && (
                     <div>
                       <div className="text-xs text-green-700 bg-green-50 rounded-xl px-4 py-3 mb-3">
-                        🎉 Your offer was accepted! Contact the seller to complete the transaction.
+                        🎉 Your offer was accepted! Pay securely below, then arrange the handover with the seller.
                       </div>
-                      <div className="flex gap-2 flex-wrap">
+
+                      {/* Secure escrow payment */}
+                      <PaymentPanel offer={offer} isSeller={false} />
+
+                      <div className="flex gap-2 flex-wrap mt-3">
                         {canReview && !showReview[offer.id] && (
                           <button
                             onClick={() => setShowReview((prev) => ({ ...prev, [offer.id]: true }))}
@@ -539,6 +544,11 @@ export default function OffersPage() {
                         />
                       )}
                     </div>
+                  )}
+
+                  {/* ── Seller: accepted → escrow status ── */}
+                  {isSeller && offer.status === "accepted" && (
+                    <PaymentPanel offer={offer} isSeller={true} />
                   )}
 
                   {/* ── Buyer: countered ── */}
