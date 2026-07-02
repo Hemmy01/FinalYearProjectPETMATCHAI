@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2, ChevronRight, ChevronLeft } from "lucide-react";
 import { useAuth, Role } from "@/lib/auth-context";
 import AuthVideoPanel from "@/components/AuthVideoPanel";
+import LocationSelect from "@/components/LocationSelect";
+import PhoneInput from "@/components/PhoneInput";
+import { isValidNigerianMobile, toNationalDigits } from "@/lib/nigeria";
 
 const roleConfig: { role: Role; label: string; emoji: string; desc: string; active: string }[] = [
   { role: "buyer", label: "Buyer", emoji: "🛒", desc: "Browse and adopt pets", active: "border-indigo-500 bg-indigo-50" },
@@ -49,6 +52,11 @@ export default function RegisterPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!isValidNigerianMobile(toNationalDigits(phone))) {
+      setError("Please enter a valid Nigerian phone number (e.g. 0803 123 4567).");
+      return;
+    }
+    if (!location) { setError("Please select your location."); return; }
     if (password !== confirmPassword) { setError("Passwords do not match."); return; }
     if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
     setError("");
@@ -176,14 +184,12 @@ export default function RegisterPage() {
 
               <div>
                 <label htmlFor="reg-phone" className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input id="reg-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel"
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="+234 XXX XXX XXXX" />
+                <PhoneInput id="reg-phone" value={phone} onChange={setPhone} required />
               </div>
 
               <div>
                 <label htmlFor="reg-location" className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-                <input id="reg-location" value={location} onChange={(e) => setLocation(e.target.value)} autoComplete="address-level2"
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Lagos, Nigeria" />
+                <LocationSelect id="reg-location" value={location} onChange={setLocation} required />
               </div>
 
               {role === "seller" && (

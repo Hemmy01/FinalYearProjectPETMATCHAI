@@ -7,6 +7,9 @@ import { api } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { useRef } from "react";
+import LocationSelect from "@/components/LocationSelect";
+import PhoneInput from "@/components/PhoneInput";
+import { isValidNigerianMobile, toNationalDigits } from "@/lib/nigeria";
 
 const tabs = ["Profile", "Preferences", "Notifications", "Security", "My Reviews"] as const;
 type Tab = typeof tabs[number];
@@ -210,6 +213,10 @@ export default function ProfilePage() {
   }
 
   async function saveProfile() {
+    if (phone && !isValidNigerianMobile(toNationalDigits(phone))) {
+      setProfileMsg("Error: Enter a valid Nigerian phone number (e.g. 0803 123 4567).");
+      return;
+    }
     setProfileSaving(true);
     setProfileMsg("");
     const payload: Record<string, string> = { name, phone, location };
@@ -327,11 +334,11 @@ export default function ProfilePage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} className={inp} placeholder="+234 80 0000 0000" />
+              <PhoneInput value={phone} onChange={setPhone} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-              <input value={location} onChange={(e) => setLocation(e.target.value)} className={inp} placeholder="Lagos, Nigeria" />
+              <LocationSelect value={location} onChange={setLocation} />
             </div>
 
             {user.role === "seller" && (
@@ -418,8 +425,7 @@ export default function ProfilePage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Preferred Location</label>
-                  <input value={prefLocation} onChange={(e) => setPrefLocation(e.target.value)}
-                    className={inp} placeholder="Lagos, Abuja..." />
+                  <LocationSelect id="pref-location" value={prefLocation} onChange={setPrefLocation} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Preferred Gender</label>
@@ -564,7 +570,7 @@ export default function ProfilePage() {
         {tab === "Security" && (
           <div className="space-y-4">
             <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg text-sm text-green-700 mb-4">
-              <Lock size={16} /> Your account is secured with Supabase Auth (bcrypt + JWT)
+              <Lock size={16} /> Your password is encrypted and your account is protected with industry-standard security.
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
