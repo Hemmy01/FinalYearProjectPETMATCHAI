@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { Send, Loader2, MessageSquare, Flag, Search, Archive, ArchiveRestore, CheckCheck, Video } from "lucide-react";
+import { Send, Loader2, MessageSquare, Flag, Search, Archive, ArchiveRestore, CheckCheck, Check, Clock, AlertCircle, RotateCw, Video } from "lucide-react";
 import VideoCallModal from "@/components/VideoCallModal";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
@@ -31,8 +31,23 @@ type Message = {
   sender_id: string;
   content: string;
   is_read: boolean;
+  delivered_at?: string | null;
   created_at: string;
   sender: { id: string; name: string } | null;
+  pending?: boolean;   // send in flight (optimistic)
+  failed?: boolean;    // send failed — offer retry
+};
+
+type MsgStatus = "sending" | "sent" | "delivered" | "seen" | "failed";
+function messageStatus(m: Message): MsgStatus {
+  if (m.failed) return "failed";
+  if (m.pending) return "sending";
+  if (m.is_read) return "seen";
+  if (m.delivered_at) return "delivered";
+  return "sent";
+}
+const STATUS_LABEL: Record<MsgStatus, string> = {
+  sending: "Sending…", sent: "Sent", delivered: "Delivered", seen: "Seen", failed: "Not sent",
 };
 
 function timeLabel(iso: string) {
@@ -148,9 +163,12 @@ export default function MessagesPage() {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "messages", filter: `thread_id=eq.${activeThread.id}` },
         (payload) => {
-          const updated = payload.new as { id: string; is_read: boolean; sender_id: string };
-          if (updated.is_read && updated.sender_id === user.id) {
-            setMessages((prev) => prev.map((m) => m.id === updated.id ? { ...m, is_read: true } : m));
+          const updated = payload.new as { id: string; is_read: boolean; delivered_at: string | null; sender_id: string };
+          // Reflect delivered/seen receipts on the sender's own messages.
+          if (updated.sender_id === user.id) {
+            setMessages((prev) => prev.map((m) => m.id === updated.id
+              ? { ...m, is_read: updated.is_read, delivered_at: updated.delivered_at }
+              : m));
           }
         }
       )
@@ -178,45 +196,45 @@ export default function MessagesPage() {
     };
   }, [activeThread?.id, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Send (or retry) a message; updates the optimistic bubble's status.
+  async function deliver(content: string, optimisticId: string, threadId: string) {
+    const res = await api.post("/api/messages", { threadId, content }).catch(() => ({ error: "network" }));
+    if (res.error || !res.data) {
+      setMessages((prev) => prev.map((m) => m.id === optimisticId ? { ...m, pending: false, failed: true } : m));
+      return;
+    }
+    setMessages((prev) => prev.map((m) => m.id === optimisticId
+      ? { ...m, id: res.data.id, pending: false, failed: false, created_at: res.data.created_at ?? m.created_at }
+      : m));
+    setThreads((prev) => prev.map((t) =>
+      t.id === threadId ? { ...t, last_message: content, last_message_at: new Date().toISOString() } : t));
+  }
+
   async function sendMessage() {
     if (!input.trim() || !activeThread || sending) return;
     const content = input.trim();
     setInput("");
     setSending(true);
-
-    // Optimistic update
+    const optimisticId = `opt-${Date.now()}`;
     const optimistic: Message = {
-      id: `opt-${Date.now()}`,
+      id: optimisticId,
       thread_id: activeThread.id,
       sender_id: user!.id,
       content,
       is_read: false,
+      delivered_at: null,
       created_at: new Date().toISOString(),
       sender: { id: user!.id, name: user!.name ?? "You" },
+      pending: true,
     };
     setMessages((prev) => [...prev, optimistic]);
-
-    const res = await api.post("/api/messages", {
-      threadId: activeThread.id,
-      content,
-    });
+    await deliver(content, optimisticId, activeThread.id);
     setSending(false);
+  }
 
-    if (res.error) {
-      // Rollback optimistic message on failure
-      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
-      return;
-    }
-
-    // Replace optimistic with real message and update thread preview
-    setMessages((prev) =>
-      prev.map((m) => (m.id === optimistic.id ? { ...optimistic, id: res.data.id } : m))
-    );
-    setThreads((prev) =>
-      prev.map((t) =>
-        t.id === activeThread.id ? { ...t, last_message: content, last_message_at: new Date().toISOString() } : t
-      )
-    );
+  async function retryMessage(msg: Message) {
+    setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, pending: true, failed: false } : m));
+    await deliver(msg.content, msg.id, msg.thread_id);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -461,30 +479,42 @@ export default function MessagesPage() {
                 </div>
               ) : (
                 (() => {
-                  // Find index of last sent message that has been read (for "Seen" receipt)
-                  let lastSeenIdx = -1;
-                  messages.forEach((m, i) => { if (m.sender_id === user.id && m.is_read) lastSeenIdx = i; });
+                  let lastMineIdx = -1;
+                  messages.forEach((m, i) => { if (m.sender_id === user.id) lastMineIdx = i; });
                   return messages.map((msg, idx) => {
                     const isMe = msg.sender_id === user.id;
+                    const status = messageStatus(msg);
                     return (
                       <div key={msg.id}>
                         <div className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                           <div className={`max-w-xs lg:max-w-sm px-4 py-2.5 rounded-2xl text-sm ${
                             isMe
-                              ? "bg-indigo-600 text-white rounded-br-sm"
+                              ? `text-white rounded-br-sm ${status === "failed" ? "bg-red-500" : "bg-indigo-600"}`
                               : "bg-gray-100 text-gray-800 rounded-bl-sm"
                           }`}>
                             <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                            <p className={`text-[11px] mt-1 ${isMe ? "text-indigo-200" : "text-gray-400"}`}>
+                            <p className={`text-[11px] mt-1 flex items-center gap-1 ${isMe ? "justify-end text-indigo-200" : "text-gray-400"}`}>
                               {timeLabel(msg.created_at)}
+                              {isMe && status === "sending" && <Clock size={11} aria-label="Sending" />}
+                              {isMe && status === "sent" && <Check size={12} aria-label="Sent" />}
+                              {isMe && status === "delivered" && <CheckCheck size={12} aria-label="Delivered" />}
+                              {isMe && status === "seen" && <CheckCheck size={12} className="text-white" aria-label="Seen" />}
+                              {isMe && status === "failed" && <AlertCircle size={12} className="text-white" aria-label="Not sent" />}
                             </p>
                           </div>
                         </div>
-                        {isMe && idx === lastSeenIdx && (
-                          <div className="flex justify-end mt-0.5 pr-1">
-                            <span className="flex items-center gap-0.5 text-[11px] text-indigo-400">
-                              <CheckCheck size={12} /> Seen
-                            </span>
+                        {isMe && (status === "failed" || idx === lastMineIdx) && (
+                          <div className="flex justify-end items-center mt-0.5 pr-1 text-[11px]">
+                            {status === "failed" ? (
+                              <button onClick={() => retryMessage(msg)}
+                                className="flex items-center gap-1 text-red-500 hover:underline font-medium">
+                                <AlertCircle size={12} /> Not sent · <RotateCw size={11} /> Retry
+                              </button>
+                            ) : (
+                              <span className={`flex items-center gap-0.5 ${status === "seen" ? "text-indigo-500 font-medium" : "text-gray-400"}`}>
+                                {STATUS_LABEL[status]}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>

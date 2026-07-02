@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse, after } from "next/server"
 import { createAdminClient, verifyToken } from "@/lib/supabase"
 import { emailNewMessage } from "@/lib/email"
 import { smsNewMessage } from "@/lib/sms"
@@ -15,7 +15,11 @@ export async function GET(req: NextRequest) {
   const threadId = new URL(req.url).searchParams.get("threadId")
 
   if (threadId) {
-    // Fetch messages in a specific thread
+    // Opening a thread = the incoming messages are both delivered and seen.
+    const now = new Date().toISOString()
+    await db.from("messages").update({ is_read: true }).eq("thread_id", threadId).neq("sender_id", user.id)
+    await db.from("messages").update({ delivered_at: now }).eq("thread_id", threadId).neq("sender_id", user.id).is("delivered_at", null)
+
     const { data, error } = await db
       .from("messages")
       .select("*, sender:profiles!messages_sender_id_fkey(id, name, avatar_url)")
@@ -23,14 +27,6 @@ export async function GET(req: NextRequest) {
       .order("created_at", { ascending: true })
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    // Mark messages as read
-    await db
-      .from("messages")
-      .update({ is_read: true })
-      .eq("thread_id", threadId)
-      .neq("sender_id", user.id)
-
     return NextResponse.json({ data: data ?? [] })
   }
 
@@ -48,7 +44,31 @@ export async function GET(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ data: data ?? [] })
+  const threads = data ?? []
+  const threadIds = threads.map((t) => t.id)
+  let unreadMessages = 0
+  const unreadByThread: Record<string, number> = {}
+
+  if (threadIds.length > 0) {
+    // Loading the inbox = all incoming messages have reached this user's device.
+    await db.from("messages").update({ delivered_at: new Date().toISOString() })
+      .in("thread_id", threadIds).neq("sender_id", user.id).is("delivered_at", null)
+
+    // Count unread (incoming, not yet read) per thread.
+    const { data: unreadRows } = await db
+      .from("messages")
+      .select("thread_id")
+      .in("thread_id", threadIds)
+      .neq("sender_id", user.id)
+      .eq("is_read", false)
+    for (const row of unreadRows ?? []) {
+      unreadByThread[row.thread_id] = (unreadByThread[row.thread_id] ?? 0) + 1
+      unreadMessages++
+    }
+  }
+
+  const withUnread = threads.map((t) => ({ ...t, unread_count: unreadByThread[t.id] ?? 0 }))
+  return NextResponse.json({ data: withUnread, unreadMessages })
 }
 
 export async function POST(req: NextRequest) {
@@ -113,26 +133,29 @@ export async function POST(req: NextRequest) {
     const petName = thread.pet?.name ?? "a pet"
     const prefs = recipient?.notification_prefs as Record<string, boolean> | null
 
-    void db.from("notifications").insert({
-      user_id: recipientId,
-      type: "message",
-      title: "New message",
-      message: `${senderName}: ${content.slice(0, 80)}`,
-      data: { thread_id, pet_name: petName },
+    // Run notification side-effects after the response so they complete reliably
+    // on serverless (a bare fire-and-forget promise can be dropped once the
+    // function returns).
+    after(async () => {
+      await db.from("notifications").insert({
+        user_id: recipientId,
+        type: "message",
+        title: "New message",
+        message: `${senderName}: ${content.slice(0, 80)}`,
+        data: { thread_id, pet_name: petName },
+      })
+      await sendPushToUser(recipientId, {
+        title: `New message from ${senderName}`,
+        body: content.slice(0, 120),
+        url: `/messages?thread=${thread_id}`,
+      })
+      if (recipient?.email && prefs?.channel_email !== false) {
+        await emailNewMessage(recipient.email, senderName ?? "Someone", petName, content.slice(0, 200))
+      }
+      if (recipient?.phone && prefs?.channel_sms === true) {
+        await smsNewMessage(recipient.phone, senderName ?? "Someone", petName)
+      }
     })
-
-    void sendPushToUser(recipientId, {
-      title: `New message from ${senderName}`,
-      body: content.slice(0, 120),
-      url: `/messages?thread=${thread_id}`,
-    })
-
-    if (recipient?.email && prefs?.channel_email !== false) {
-      void emailNewMessage(recipient.email, senderName ?? "Someone", petName, content.slice(0, 200))
-    }
-    if (recipient?.phone && prefs?.channel_sms === true) {
-      void smsNewMessage(recipient.phone, senderName ?? "Someone", petName)
-    }
   }
 
   return NextResponse.json({ success: true, data: message, threadId: thread_id }, { status: 201 })
