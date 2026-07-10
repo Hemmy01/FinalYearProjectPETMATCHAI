@@ -163,6 +163,12 @@ export default function AdminPage() {
     setPets((prev) => prev.map((p) => p.id === petId ? { ...p, status } : p));
   }
 
+  async function rejectListing(petId: string) {
+    // "Remove" deletes the listing — there is no 'rejected' pet status.
+    await api.delete(`/api/pets?id=${petId}`);
+    setPets((prev) => prev.filter((p) => p.id !== petId));
+  }
+
   async function setUserStatus(userId: string, status: "active" | "suspended" | "disabled") {
     const res = await api.patch("/api/admin", { type: "setUserStatus", userId, status });
     if (res.error) throw new Error(res.error);
@@ -482,13 +488,11 @@ export default function AdminPage() {
                             <CheckCircle size={11} /> Approve
                           </button>
                         )}
-                        {p.status !== "rejected" && (
-                          <button
-                            onClick={() => doAction(() => changeListingStatus(p.id, "rejected"), `${p.name} removed.`)}
-                            className="flex items-center gap-0.5 text-xs text-red-500 hover:underline">
-                            <XCircle size={11} /> Remove
-                          </button>
-                        )}
+                        <button
+                          onClick={() => { if (confirm(`Remove "${p.name}"? This permanently deletes the listing.`)) doAction(() => rejectListing(p.id), `${p.name} removed.`); }}
+                          className="flex items-center gap-0.5 text-xs text-red-500 hover:underline">
+                          <XCircle size={11} /> Remove
+                        </button>
                       </div>
                     </td>
                   </tr>

@@ -178,7 +178,8 @@ export default function AdminDashboardPage() {
                     </button>
                     <button
                       onClick={async () => {
-                        await api.patch("/api/pets", { id: p.id, status: "rejected" });
+                        if (!confirm(`Reject and delete "${p.name}"?`)) return;
+                        await api.delete(`/api/pets?id=${p.id}`);
                         setPendingListings((prev) => prev.filter((x) => x.id !== p.id));
                       }}
                       className="flex items-center gap-1 border border-red-300 text-red-600 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-red-50">

@@ -186,13 +186,18 @@ export async function PATCH(req: NextRequest) {
   // Capture current values before update for change detection and audit logging
   const { data: oldPet } = await db.from("pets").select("name, price, status, breed, species, description, vaccinated, dewormed, microchipped, featured, location").eq("id", id).single()
 
-  const { data, error } = await db
+  // Sellers may only edit their own listings; admins can moderate any listing
+  // (e.g. approving a pending pet they don't own).
+  const { data: actor } = await db.from("profiles").select("role").eq("id", user.id).single()
+  const isAdmin = actor?.role === "administrator"
+
+  let updateQuery = db
     .from("pets")
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq("id", id)
-    .eq("seller_id", user.id)
-    .select()
-    .single()
+  if (!isAdmin) updateQuery = updateQuery.eq("seller_id", user.id)
+
+  const { data, error } = await updateQuery.select().single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
