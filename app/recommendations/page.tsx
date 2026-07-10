@@ -156,8 +156,8 @@ export default function RecommendationsPage() {
         </div>
         <h2 className="text-xl font-bold text-gray-900 mb-2">Set your preferences first</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Groq AI needs to know what kind of pet you're looking for — species, breed, budget, purpose — before it can
-          score and rank matches for you.
+          We need to know what kind of pet you're looking for — species, breed, budget, purpose — before the matching
+          engine can score and rank matches for you.
         </p>
         <Link href="/profile"
           className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-semibold hover:bg-indigo-700 text-sm inline-block">
@@ -173,7 +173,7 @@ export default function RecommendationsPage() {
       <div className="flex items-start justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">AI Recommendations</h1>
-          <p className="text-sm text-gray-500 mt-1">Personalised matches scored by Groq</p>
+          <p className="text-sm text-gray-500 mt-1">Personalised matches scored against your preferences</p>
         </div>
         <div className="flex gap-2">
           <Link href="/profile"
@@ -211,7 +211,7 @@ export default function RecommendationsPage() {
             <div className="text-center py-16 text-gray-400">
               <History size={40} className="mx-auto mb-3 text-gray-300" />
               <p className="font-medium">No history yet</p>
-              <p className="text-sm mt-1">Pets scored by Groq AI will appear here.</p>
+              <p className="text-sm mt-1">Pets scored by the matching engine will appear here.</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -272,7 +272,7 @@ export default function RecommendationsPage() {
             <Loader2 size={20} className="animate-spin text-indigo-600 absolute -top-1 -right-1" />
           </div>
           <div className="text-center">
-            <p className="font-semibold text-gray-900">Groq is scoring your matches…</p>
+            <p className="font-semibold text-gray-900">Finding your best matches…</p>
             <p className="text-sm text-gray-400 mt-1">This usually takes 5–15 seconds</p>
           </div>
         </div>

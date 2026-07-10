@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { ArrowLeft, Scale, CheckCircle, X, Loader2 } from "lucide-react";
 import { useCompare } from "@/lib/compare-context";
+import VerifiedBadge from "@/components/VerifiedBadge";
 
 type Pet = {
   id: string; name: string; species: string; breed: string; age_months: number;
@@ -42,7 +43,7 @@ const ROWS: { label: string; render: (p: Pet) => React.ReactNode }[] = [
   { label: "Seller",        render: (p) => (
     <span className="flex items-center gap-1 text-sm">
       {p.seller?.name ?? "—"}
-      {p.seller?.is_verified && <CheckCircle size={12} className="text-green-500 shrink-0" />}
+      {p.seller?.is_verified && <VerifiedBadge size={13} />}
     </span>
   )},
   { label: "Views",         render: (p) => <span className="text-sm">{p.views}</span> },

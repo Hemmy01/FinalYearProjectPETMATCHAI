@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient, verifyToken } from "@/lib/supabase"
+import { buildDemandForecast, priceOptimization, priceHint } from "@/lib/forecast"
 
 export async function POST(req: NextRequest) {
   const token = req.headers.get("Authorization")?.replace("Bearer ", "")
@@ -53,6 +54,46 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 15)
     return NextResponse.json({ data: sorted })
+  }
+
+  // Demand forecast + price optimisation — any authenticated user (market intelligence).
+  if (sp.get("forecast") === "true" && token) {
+    const { user } = await verifyToken(token)
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+    const months = 6
+    const since = new Date()
+    since.setUTCMonth(since.getUTCMonth() - (months - 1), 1)
+    since.setUTCHours(0, 0, 0, 0)
+    const sinceISO = since.toISOString()
+
+    const [listingRows, offerRows, viewRows, allPets] = await Promise.all([
+      db.from("pets").select("created_at").gte("created_at", sinceISO),
+      db.from("offers").select("created_at").gte("created_at", sinceISO),
+      db.from("pet_views").select("viewed_at").gte("viewed_at", sinceISO),
+      db.from("pets").select("breed, species, price, status, created_at, updated_at"),
+    ])
+
+    const forecast = buildDemandForecast(
+      (listingRows.data ?? []).map((r: { created_at: string }) => r.created_at),
+      (offerRows.data ?? []).map((r: { created_at: string }) => r.created_at),
+      (viewRows.data ?? []).map((r: { viewed_at: string }) => r.viewed_at),
+      months,
+    )
+    const priceBands = priceOptimization((allPets.data ?? []) as Parameters<typeof priceOptimization>[0])
+
+    return NextResponse.json({ forecast, priceBands })
+  }
+
+  // Live price hint for a seller typing a price on the listing form.
+  if (sp.get("priceHint") === "true" && token) {
+    const { user } = await verifyToken(token)
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const breed = sp.get("breed") ?? ""
+    const price = Number(sp.get("price") ?? 0)
+    const { data: listings } = await db.from("pets").select("breed, price").eq("status", "active")
+    const hint = priceHint(breed, price, (listings ?? []) as { breed: string; price: number }[])
+    return NextResponse.json({ hint })
   }
 
   // For seller analytics, require auth

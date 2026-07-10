@@ -20,6 +20,7 @@ type Thread = {
   last_message: string | null;
   last_message_at: string | null;
   unread_count: number;
+  dispute_status?: string | null;   // null | 'open' (under review) | 'resolved'
   pet: { id: string; name: string; breed: string; image_url: string | null } | null;
   buyer: { id: string; name: string } | null;
   seller: { id: string; name: string } | null;
@@ -268,6 +269,66 @@ export default function MessagesPage() {
     return user!.id === thread.buyer?.id ? thread.seller : thread.buyer;
   }
 
+  // One sidebar row — reused for both the normal list and the disputed section.
+  const threadRow = (t: Thread) => {
+    const other = otherParty(t);
+    const initials = (other?.name ?? "?")[0].toUpperCase();
+    const isDisputed = t.dispute_status === "open";
+    const isResolved = t.dispute_status === "resolved";
+    return (
+      <div key={t.id} className="group relative">
+        <button
+          onClick={() => setActiveThread(t)}
+          className={`w-full text-left p-4 border-b border-gray-100 hover:bg-gray-50 transition-colors ${
+            activeThread?.id === t.id ? "bg-indigo-50 border-l-2 border-l-indigo-600" : isDisputed ? "border-l-2 border-l-red-400" : ""
+          }`}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-sm font-bold text-indigo-700 flex-shrink-0">
+              {initials}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-between items-center gap-1">
+                <span className="text-sm font-medium text-gray-900 truncate">
+                  {other?.name ?? "Unknown"}
+                </span>
+                <span className="text-[11px] text-gray-400 flex-shrink-0">
+                  {t.last_message_at ? timeLabel(t.last_message_at) : ""}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 truncate mt-0.5">
+                {t.pet?.name ? <span className="text-indigo-500">{t.pet.name}</span> : null}
+                {t.pet?.name && t.last_message ? " · " : ""}
+                {t.last_message ?? "No messages yet"}
+              </p>
+              {isDisputed && (
+                <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-1.5 py-0.5">
+                  <AlertCircle size={9} /> Under review
+                </span>
+              )}
+              {isResolved && (
+                <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold text-green-600 bg-green-50 border border-green-200 rounded-full px-1.5 py-0.5">
+                  <Check size={9} /> Dispute resolved
+                </span>
+              )}
+            </div>
+            {t.unread_count > 0 && (
+              <span className="bg-indigo-600 text-white text-[11px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">
+                {t.unread_count}
+              </span>
+            )}
+          </div>
+        </button>
+        {/* Archive button on hover */}
+        <button
+          onClick={(e) => { e.stopPropagation(); toggleArchive(t.id); }}
+          title={archivedIds.has(t.id) ? "Unarchive" : "Archive"}
+          className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-gray-600 bg-white rounded-lg shadow-sm transition-opacity">
+          {archivedIds.has(t.id) ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+        </button>
+      </div>
+    );
+  };
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Messages</h1>
@@ -306,68 +367,37 @@ export default function MessagesPage() {
                 <p className="text-sm text-gray-400">No conversations yet.</p>
                 <p className="text-xs text-gray-400 mt-1">Message a seller from any listing page.</p>
               </div>
-            ) : (
-              threads
-                .filter((t) => {
-                  const isArchived = archivedIds.has(t.id);
-                  if (showArchived) return isArchived;
-                  if (isArchived) return false;
-                  if (!threadSearch.trim()) return true;
-                  const q = threadSearch.toLowerCase();
-                  const other = otherParty(t);
-                  return (
-                    (other?.name ?? "").toLowerCase().includes(q) ||
-                    (t.pet?.name ?? "").toLowerCase().includes(q) ||
-                    (t.last_message ?? "").toLowerCase().includes(q)
-                  );
-                })
-                .map((t) => {
+            ) : (() => {
+              const visible = threads.filter((t) => {
+                const isArchived = archivedIds.has(t.id);
+                if (showArchived) return isArchived;
+                if (isArchived) return false;
+                if (!threadSearch.trim()) return true;
+                const q = threadSearch.toLowerCase();
                 const other = otherParty(t);
-                const initials = (other?.name ?? "?")[0].toUpperCase();
                 return (
-                  <div key={t.id} className="group relative">
-                    <button
-                      onClick={() => setActiveThread(t)}
-                      className={`w-full text-left p-4 border-b border-gray-100 hover:bg-gray-50 transition-colors ${
-                        activeThread?.id === t.id ? "bg-indigo-50 border-l-2 border-l-indigo-600" : ""
-                      }`}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-sm font-bold text-indigo-700 flex-shrink-0">
-                          {initials}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-center gap-1">
-                            <span className="text-sm font-medium text-gray-900 truncate">
-                              {other?.name ?? "Unknown"}
-                            </span>
-                            <span className="text-[11px] text-gray-400 flex-shrink-0">
-                              {t.last_message_at ? timeLabel(t.last_message_at) : ""}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-500 truncate mt-0.5">
-                            {t.pet?.name ? <span className="text-indigo-500">{t.pet.name}</span> : null}
-                            {t.pet?.name && t.last_message ? " · " : ""}
-                            {t.last_message ?? "No messages yet"}
-                          </p>
-                        </div>
-                        {t.unread_count > 0 && (
-                          <span className="bg-indigo-600 text-white text-[11px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">
-                            {t.unread_count}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                    {/* Archive button on hover */}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); toggleArchive(t.id); }}
-                      title={archivedIds.has(t.id) ? "Unarchive" : "Archive"}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-gray-600 bg-white rounded-lg shadow-sm transition-opacity">
-                      {archivedIds.has(t.id) ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-                    </button>
-                  </div>
+                  (other?.name ?? "").toLowerCase().includes(q) ||
+                  (t.pet?.name ?? "").toLowerCase().includes(q) ||
+                  (t.last_message ?? "").toLowerCase().includes(q)
                 );
-              })
-            )}
+              });
+              const disputed = visible.filter((t) => t.dispute_status === "open");
+              const normal = visible.filter((t) => t.dispute_status !== "open");
+              return (
+                <>
+                  {disputed.length > 0 && (
+                    <div>
+                      <div className="px-3 py-2 bg-red-50 border-b border-red-100 flex items-center gap-1.5">
+                        <AlertCircle size={12} className="text-red-500" />
+                        <span className="text-[11px] font-semibold text-red-600 uppercase tracking-wide">Disputed · under review</span>
+                      </div>
+                      {disputed.map(threadRow)}
+                    </div>
+                  )}
+                  {normal.map(threadRow)}
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -466,6 +496,22 @@ export default function MessagesPage() {
                 )}
               </div>
             </div>
+
+            {/* Dispute review banner */}
+            {activeThread.dispute_status === "open" && (
+              <div className="px-4 py-2.5 bg-red-50 border-b border-red-100 flex items-start gap-2">
+                <AlertCircle size={14} className="text-red-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-red-700">
+                  This conversation is under dispute review. An admin has been notified and will help resolve it — please keep all communication here.
+                </p>
+              </div>
+            )}
+            {activeThread.dispute_status === "resolved" && (
+              <div className="px-4 py-2.5 bg-green-50 border-b border-green-100 flex items-start gap-2">
+                <Check size={14} className="text-green-600 mt-0.5 shrink-0" />
+                <p className="text-xs text-green-700">This dispute has been resolved by an admin.</p>
+              </div>
+            )}
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">

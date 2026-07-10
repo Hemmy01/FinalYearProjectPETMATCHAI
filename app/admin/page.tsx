@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Users, List, AlertTriangle, CheckCircle, XCircle, Shield, Loader2, RefreshCw, Star, Trash2, Brain, Zap, Download, Search, Filter, Gavel, Tag } from "lucide-react";
+import { Users, List, AlertTriangle, CheckCircle, XCircle, Shield, Loader2, RefreshCw, Star, Trash2, Brain, Zap, Download, Search, Filter, Gavel, Tag, MessageSquare, X } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
@@ -21,7 +21,9 @@ const TX_STATUS_STYLES: Record<string, string> = {
 type UserRow = { id: string; name: string; email: string; role: string; location: string; is_verified: boolean; status?: string; created_at: string };
 type PetRow = { id: string; name: string; breed: string; price: number; status: string; seller: { name: string } | null };
 type AuditRow = { id: string; action: string; entity_type: string; created_at: string; user: { name: string; email: string } | null; details: Record<string, unknown> };
-type DisputeRow = { id: string; subject: string; description: string; status: string; created_at: string; offer_id?: string | null; escrow?: { reference: string; amount: number; status: string } | null; reporter: { name: string; email: string } | null; respondent: { name: string; email: string } | null };
+type DisputeRow = { id: string; subject: string; description: string; status: string; created_at: string; offer_id?: string | null; thread_id?: string | null; escrow?: { reference: string; amount: number; status: string } | null; reporter: { name: string; email: string } | null; respondent: { name: string; email: string } | null };
+type ConvoMsg = { id: string; sender_id: string; content: string; created_at: string };
+type ConvoState = { open: boolean; loading: boolean; subject: string; thread: { pet: { name: string } | null; buyer: { id: string; name: string } | null; seller: { id: string; name: string } | null } | null; messages: ConvoMsg[] };
 
 function timeAgo(iso: string) {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -65,7 +67,14 @@ export default function AdminPage() {
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [resolutionText, setResolutionText] = useState("");
   const [resolutionSubmitting, setResolutionSubmitting] = useState(false);
-  const [refundOnResolve, setRefundOnResolve] = useState(false);
+  const [resolveOutcome, setResolveOutcome] = useState<"none" | "refund_buyer" | "release_seller">("none");
+  const [convo, setConvo] = useState<ConvoState | null>(null);
+
+  async function openConversation(threadId: string, subject: string) {
+    setConvo({ open: true, loading: true, subject, thread: null, messages: [] });
+    const res = await api.get(`/api/admin?type=disputeThread&threadId=${threadId}`);
+    setConvo({ open: true, loading: false, subject, thread: res.thread ?? null, messages: res.messages ?? [] });
+  }
 
   // Categories search
   const [breedSearch, setBreedSearch] = useState("");
@@ -190,14 +199,17 @@ export default function AdminPage() {
   async function resolveDispute(disputeId: string) {
     if (!resolutionText.trim()) return;
     setResolutionSubmitting(true);
-    const res = await api.patch("/api/admin", { type: "resolveDispute", disputeId, resolution: resolutionText.trim(), refund: refundOnResolve });
+    const res = await api.patch("/api/admin", { type: "resolveDispute", disputeId, resolution: resolutionText.trim(), outcome: resolveOutcome });
     setResolutionSubmitting(false);
     if (!res.error) {
-      setDisputes((prev) => prev.map((d) => d.id === disputeId ? { ...d, status: "resolved", escrow: res.refunded ? null : d.escrow } : d));
+      setDisputes((prev) => prev.map((d) => d.id === disputeId ? { ...d, status: "resolved", escrow: res.settlement ? null : d.escrow } : d));
       setResolvingId(null);
       setResolutionText("");
-      setRefundOnResolve(false);
-      doAction(async () => {}, res.refunded ? "Dispute resolved & buyer refunded." : "Dispute resolved.");
+      setResolveOutcome("none");
+      const msg = res.settlement === "refunded" ? "Dispute resolved & buyer refunded."
+        : res.settlement === "released" ? "Dispute resolved & funds released to seller."
+        : "Dispute resolved.";
+      doAction(async () => {}, msg);
     }
   }
 
@@ -648,7 +660,7 @@ export default function AdminPage() {
                     </div>
                     <div>
                       <p className="font-semibold text-gray-900 text-sm">Groq AI — llama-3.3-70b-versatile</p>
-                      <p className="text-xs text-gray-500">Batch match scoring · Recommendation summaries · Cached in ai_matches table</p>
+                      <p className="text-xs text-gray-500">Recommendation summaries · Analytics executive summary · Match scoring runs on the deterministic engine (cached in ai_matches)</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -874,9 +886,16 @@ export default function AdminPage() {
                           <td className="px-4 py-3">
                             {d.status === "pending" && (
                               <button
-                                onClick={() => { setResolvingId(d.id); setResolutionText(""); setRefundOnResolve(false); }}
+                                onClick={() => { setResolvingId(d.id); setResolutionText(""); setResolveOutcome("none"); }}
                                 className="text-xs text-indigo-600 hover:underline font-medium">
                                 Resolve
+                              </button>
+                            )}
+                            {d.thread_id && (
+                              <button
+                                onClick={() => openConversation(d.thread_id!, d.subject)}
+                                className="flex items-center gap-1 mt-1 text-xs text-gray-600 hover:text-indigo-600 hover:underline">
+                                <MessageSquare size={11} /> View chat
                               </button>
                             )}
                             {d.escrow && (
@@ -903,17 +922,32 @@ export default function AdminPage() {
                                     {resolutionSubmitting ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
                                     Mark Resolved
                                   </button>
-                                  <button onClick={() => { setResolvingId(null); setRefundOnResolve(false); }}
+                                  <button onClick={() => { setResolvingId(null); setResolveOutcome("none"); }}
                                     className="text-xs text-gray-500 hover:text-gray-700 text-center">
                                     Cancel
                                   </button>
                                 </div>
                               </div>
-                              {d.escrow && (
-                                <label className="flex items-center gap-2 mt-2.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 cursor-pointer">
-                                  <input type="checkbox" checked={refundOnResolve} onChange={(e) => setRefundOnResolve(e.target.checked)} className="accent-amber-600" />
-                                  Refund the buyer&apos;s escrow payment of <strong>₦{d.escrow.amount.toLocaleString()}</strong> as part of this resolution
-                                </label>
+                              {d.escrow && d.escrow.status === "paid_escrow" && (
+                                <div className="mt-2.5">
+                                  <p className="text-xs font-medium text-gray-600 mb-1.5">
+                                    🔒 ₦{d.escrow.amount.toLocaleString()} is held in escrow — settle it for the parties:
+                                  </p>
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    {([
+                                      { v: "none", label: "No settlement", desc: "Just record a decision", cls: "border-gray-200 text-gray-600" },
+                                      { v: "refund_buyer", label: "Refund the buyer", desc: "Return funds to buyer", cls: "border-amber-300 text-amber-800 bg-amber-50" },
+                                      { v: "release_seller", label: "Release to seller", desc: "Pay the seller", cls: "border-green-300 text-green-800 bg-green-50" },
+                                    ] as const).map((opt) => (
+                                      <button key={opt.v} type="button"
+                                        onClick={() => setResolveOutcome(opt.v)}
+                                        className={`text-left rounded-lg border px-3 py-2 transition-all ${opt.cls} ${resolveOutcome === opt.v ? "ring-2 ring-indigo-500" : "opacity-80 hover:opacity-100"}`}>
+                                        <span className="block text-xs font-semibold">{opt.label}</span>
+                                        <span className="block text-[10px]">{opt.desc}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
                               )}
                             </td>
                           </tr>
@@ -1055,6 +1089,46 @@ export default function AdminPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Read-only disputed-conversation viewer */}
+      {convo?.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setConvo(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-gray-100 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-gray-900 text-sm flex items-center gap-1.5"><MessageSquare size={14} className="text-indigo-600" /> Disputed conversation</p>
+                <p className="text-xs text-gray-500 truncate mt-0.5">
+                  {convo.thread?.buyer?.name ?? "Buyer"} ↔ {convo.thread?.seller?.name ?? "Seller"}
+                  {convo.thread?.pet?.name ? ` · Re: ${convo.thread.pet.name}` : ""}
+                </p>
+              </div>
+              <button onClick={() => setConvo(null)} className="text-gray-400 hover:text-gray-600 shrink-0"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50">
+              {convo.loading ? (
+                <div className="flex justify-center py-10"><Loader2 size={20} className="animate-spin text-indigo-400" /></div>
+              ) : convo.messages.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-10">No messages in this conversation.</p>
+              ) : (
+                convo.messages.map((m) => {
+                  const isBuyer = m.sender_id === convo.thread?.buyer?.id;
+                  const name = isBuyer ? convo.thread?.buyer?.name : convo.thread?.seller?.name;
+                  return (
+                    <div key={m.id} className={`flex ${isBuyer ? "justify-start" : "justify-end"}`}>
+                      <div className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm ${isBuyer ? "bg-white border border-gray-200 text-gray-800" : "bg-indigo-600 text-white"}`}>
+                        <p className={`text-[10px] font-semibold mb-0.5 ${isBuyer ? "text-gray-400" : "text-indigo-200"}`}>{name ?? "Unknown"}</p>
+                        <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                        <p className={`text-[10px] mt-1 ${isBuyer ? "text-gray-400" : "text-indigo-200"}`}>{new Date(m.created_at).toLocaleString()}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <div className="px-5 py-2 border-t border-gray-100 text-[11px] text-gray-400 text-center">Read-only admin view</div>
+          </div>
         </div>
       )}
     </div>

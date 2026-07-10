@@ -7,6 +7,8 @@ import { api } from "@/lib/api-client";
 import Link from "next/link";
 import ImageUpload from "@/components/ImageUpload";
 import VideoUpload from "@/components/VideoUpload";
+import LocationSelect from "@/components/LocationSelect";
+import type { PriceHint } from "@/lib/forecast";
 
 const SPECIES = [
   { value: "dog",   label: "Dog"                      },
@@ -65,6 +67,20 @@ export default function NewListingPage() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [priceTip, setPriceTip] = useState<PriceHint | null>(null);
+
+  // Live, debounced market price hint as the seller types breed + price.
+  useEffect(() => {
+    const p = Number(price);
+    if (!breed.trim() || !p) { setPriceTip(null); return; }
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.get(`/api/analytics?priceHint=true&breed=${encodeURIComponent(breed.trim())}&price=${p}`);
+        setPriceTip(res.hint ?? null);
+      } catch { setPriceTip(null); }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [breed, price]);
 
   // Skip auto-save on the very first run (values just came from the draft).
   const firstRun = useRef(true);
@@ -349,10 +365,19 @@ export default function NewListingPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Price (₦) *</label>
               <input type="number" min={0} value={price} onChange={(e) => setPrice(e.target.value)} className={inp} placeholder="150000" />
+              {priceTip && (
+                <p className={`text-xs mt-1 flex items-start gap-1 ${
+                  priceTip.verdict === "above" ? "text-amber-600" :
+                  priceTip.verdict === "below" ? "text-blue-600" : "text-green-600"
+                }`}>
+                  <span>{priceTip.verdict === "above" ? "⚠" : priceTip.verdict === "below" ? "↓" : "✓"}</span>
+                  <span>{priceTip.message}</span>
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Location *</label>
-              <input value={location} onChange={(e) => setLocation(e.target.value)} className={inp} placeholder="Lagos, Nigeria" />
+              <LocationSelect value={location} onChange={setLocation} required />
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm text-gray-700 mt-3 cursor-pointer select-none">

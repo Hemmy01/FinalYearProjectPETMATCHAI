@@ -5,26 +5,44 @@ import Link from "next/link";
 import { api } from "@/lib/api-client";
 import PetCard, { PetCardData } from "@/components/PetCard";
 
+type MatchCategories = {
+  species: boolean;
+  price: boolean;
+  breed: boolean;
+  location: boolean;
+  health: boolean;
+};
+
 type Match = PetCardData & {
   matchScore: number;
   matchReasons: string[];
+  matchCategories?: MatchCategories;
   matchStatus: "pending" | "accepted" | "declined";
 };
 
+// Prefer the authoritative per-category result computed by the scoring engine
+// (lib/matching.ts) and returned as `matchCategories`. Only fall back to parsing
+// the free-text reasons for older cached rows that predate that field.
 function buildCompatibilityBreakdown(match: Match) {
-  const reasons = match.matchReasons ?? [];
-  const reasonText = reasons.join(" ").toLowerCase();
-  const speciesOk = !reasonText.includes("species mismatch") && !reasonText.includes("wrong species");
-  const priceOk = !reasonText.includes("over budget") && !reasonText.includes("exceeds budget") && !reasonText.includes("price cap");
-  const breedOk = !reasonText.includes("breed mismatch") && !reasonText.includes("wrong breed");
-  const locationOk = reasonText.includes("location match") || reasonText.includes("same location") || reasonText.includes("location");
-  const healthOk = !reasonText.includes("missing") && !reasonText.includes("not vaccinated") && !reasonText.includes("not microchipped") && !reasonText.includes("not dewormed");
+  const c = match.matchCategories;
+  const cats = c
+    ? c
+    : (() => {
+        const reasonText = (match.matchReasons ?? []).join(" ").toLowerCase();
+        return {
+          species: !reasonText.includes("species mismatch") && !reasonText.includes("wrong species") && !reasonText.includes("different species"),
+          price: !reasonText.includes("over budget") && !reasonText.includes("exceeds budget") && !reasonText.includes("price cap") && !reasonText.includes("above your"),
+          breed: !reasonText.includes("breed mismatch") && !reasonText.includes("wrong breed") && !reasonText.includes("isn't a breed"),
+          location: reasonText.includes("location match") || reasonText.includes("same location") || reasonText.includes("matching your area"),
+          health: !reasonText.includes("missing your requirement") && !reasonText.includes("not vaccinated") && !reasonText.includes("not microchipped") && !reasonText.includes("not dewormed"),
+        };
+      })();
   return [
-    { label: "Species", ok: speciesOk, icon: "🐾" },
-    { label: "Price / Budget", ok: priceOk, icon: "💰" },
-    { label: "Breed", ok: breedOk, icon: "🏷️" },
-    { label: "Location", ok: locationOk, icon: "📍" },
-    { label: "Health", ok: healthOk, icon: "💊" },
+    { label: "Species", ok: cats.species, icon: "🐾" },
+    { label: "Price / Budget", ok: cats.price, icon: "💰" },
+    { label: "Breed", ok: cats.breed, icon: "🏷️" },
+    { label: "Location", ok: cats.location, icon: "📍" },
+    { label: "Health", ok: cats.health, icon: "💊" },
   ];
 }
 
@@ -90,7 +108,7 @@ export default function MatchmakingPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Matchmaking Engine</h1>
-        <p className="text-sm text-gray-500 mt-1">AI-generated matches based on your preferences via Groq</p>
+        <p className="text-sm text-gray-500 mt-1">Matches scored against your preferences and live market data</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -104,7 +122,7 @@ export default function MatchmakingPage() {
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <p className="text-sm text-gray-500">Powered by</p>
-          <p className="text-lg font-bold text-gray-900 mt-1">⚡ Groq AI</p>
+          <p className="text-lg font-bold text-gray-900 mt-1">⚡ Match Engine</p>
         </div>
       </div>
 

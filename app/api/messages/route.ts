@@ -84,6 +84,11 @@ export async function POST(req: NextRequest) {
 
   let thread_id = threadId
 
+  // A seller can't open a message thread with themselves about their own listing.
+  if (!thread_id && sellerId && sellerId === user.id) {
+    return NextResponse.json({ error: "You can't message yourself about your own listing." }, { status: 400 })
+  }
+
   // Create thread if it doesn't exist
   if (!thread_id && petId && sellerId) {
     const { data: existing } = await db

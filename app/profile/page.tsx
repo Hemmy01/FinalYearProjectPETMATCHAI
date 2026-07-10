@@ -381,7 +381,7 @@ export default function ProfilePage() {
             <div className="space-y-6">
               <div>
                 <p className="text-sm text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 mb-4">
-                  These preferences power the AI matching engine — Groq uses them to score every pet and rank the best matches for you.
+                  These preferences power the matching engine — it uses them to score every pet and rank the best matches for you.
                 </p>
 
                 <h3 className="font-semibold text-gray-900 mb-3">Preferred Species</h3>

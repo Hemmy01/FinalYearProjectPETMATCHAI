@@ -5,6 +5,7 @@ import { Loader2, ChevronRight, ChevronLeft } from "lucide-react";
 import { useAuth, Role } from "@/lib/auth-context";
 import { supabase } from "@/lib/supabase";
 import AuthVideoPanel from "@/components/AuthVideoPanel";
+import LocationSelect from "@/components/LocationSelect";
 
 const roleConfig: { role: Role; label: string; emoji: string; desc: string; active: string }[] = [
   { role: "buyer", label: "Buyer", emoji: "🛒", desc: "Browse and adopt pets", active: "border-indigo-500 bg-indigo-50" },
@@ -175,8 +176,7 @@ export default function SelectRolePage() {
 
               <div>
                 <label htmlFor="ob-location" className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-                <input id="ob-location" value={location} onChange={(e) => setLocation(e.target.value)} autoComplete="address-level2"
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Lagos, Nigeria" />
+                <LocationSelect id="ob-location" value={location} onChange={setLocation} />
               </div>
 
               {role === "seller" && (

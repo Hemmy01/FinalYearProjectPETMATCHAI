@@ -65,6 +65,11 @@ export async function POST(req: NextRequest) {
     .single()
   if (!pet) return NextResponse.json({ error: "Pet not found" }, { status: 404 })
 
+  // A seller can't make an offer on their own listing.
+  if (pet.seller_id === user.id) {
+    return NextResponse.json({ error: "You can't make an offer on your own listing." }, { status: 400 })
+  }
+
   // Get buyer name
   const { data: buyer } = await db.from("profiles").select("name").eq("id", user.id).single()
 

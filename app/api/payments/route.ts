@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient, verifyToken } from "@/lib/supabase"
-import { paystackEnabled, paystackInitialize, paystackVerify } from "@/lib/paystack"
+import { paystackEnabled, paystackInitialize, paystackVerify, paystackRefund } from "@/lib/paystack"
+import { settleToEscrow } from "@/lib/escrow"
 
 // GET /api/payments?offerId=...  → the transaction for that offer (participant only)
 export async function GET(req: NextRequest) {
@@ -107,25 +108,21 @@ export async function POST(req: NextRequest) {
     if (tx.status === "paid_escrow" || tx.status === "released") return NextResponse.json({ data: tx })
 
     if (tx.provider === "paystack") {
-      const ok = await paystackVerify(tx.reference)
-      if (!ok) return NextResponse.json({ error: "Payment not confirmed. Please try again." }, { status: 402 })
+      const result = await paystackVerify(tx.reference)
+      if (!result.ok) return NextResponse.json({ error: "Payment not confirmed. Please try again." }, { status: 402 })
+      // Confirm the buyer paid EXACTLY what was owed — never trust the redirect alone.
+      const expectedKobo = Math.round(Number(tx.amount) * 100)
+      if (result.amountKobo !== expectedKobo || result.currency !== "NGN") {
+        return NextResponse.json({ error: "Paid amount does not match the agreed price. Please contact support." }, { status: 409 })
+      }
     }
 
-    const { data: updated, error } = await db.from("transactions")
-      .update({ status: "paid_escrow", paid_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq("id", tx.id).select().single()
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    // Reserve the pet and let the seller know the money is safely held.
-    await db.from("pets").update({ status: "pending" }).eq("id", tx.pet_id)
-    await db.from("notifications").insert({
-      user_id: tx.seller_id,
-      type: "system",
-      title: "Payment received — held in escrow 🔒",
-      message: `A buyer has paid ₦${Number(tx.amount).toLocaleString()} into escrow. Funds are released to you once the buyer confirms handover.`,
-      data: { transaction_id: tx.id, reference: tx.reference },
-    })
-    return NextResponse.json({ data: updated })
+    // Shared, race-safe transition (also used by the webhook).
+    const updated = await settleToEscrow(db, tx)
+    if (updated) return NextResponse.json({ data: updated })
+    // Already settled (e.g. the webhook beat us to it) — return the current row.
+    const { data: fresh } = await db.from("transactions").select("*").eq("id", tx.id).single()
+    return NextResponse.json({ data: fresh })
   }
 
   // ─── Release escrow (buyer confirms handover) → complete sale ─────────
@@ -159,6 +156,13 @@ export async function POST(req: NextRequest) {
     const { data: tx } = await db.from("transactions").select("*").eq("reference", body.reference).single()
     if (!tx) return NextResponse.json({ error: "Transaction not found" }, { status: 404 })
     if (tx.status !== "paid_escrow") return NextResponse.json({ error: "Only escrowed payments can be refunded." }, { status: 400 })
+
+    // For real payments, actually reverse the charge at the gateway before we
+    // record the refund — so the DB never claims a refund that didn't happen.
+    if (tx.provider === "paystack") {
+      const ok = await paystackRefund(tx.reference)
+      if (!ok) return NextResponse.json({ error: "Gateway refund could not be initiated. Please try again." }, { status: 502 })
+    }
 
     const { data: updated, error } = await db.from("transactions")
       .update({ status: "refunded", updated_at: new Date().toISOString() })

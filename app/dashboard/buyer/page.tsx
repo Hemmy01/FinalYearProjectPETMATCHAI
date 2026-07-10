@@ -138,7 +138,7 @@ export default function BuyerDashboardPage() {
         </div>
         <div className="flex-1">
           <p className="font-semibold">Find Your AI Match</p>
-          <p className="text-xs text-white/80 mt-0.5">Groq scores every pet against your preferences</p>
+          <p className="text-xs text-white/80 mt-0.5">Our engine scores every pet against your preferences</p>
         </div>
         <ChevronRight size={18} className="text-white/70" />
       </Link>
@@ -184,9 +184,9 @@ export default function BuyerDashboardPage() {
               <Link key={pet.id} href={`/listings/${pet.id}`}
                 className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
                 {pet.image_url ? (
-                  <img src={pet.image_url} alt={pet.name} className="w-full h-24 object-cover" />
+                  <img src={pet.image_url} alt={pet.name} className="w-full aspect-[4/3] object-contain bg-gray-50" />
                 ) : (
-                  <div className="bg-gradient-to-br from-indigo-100 to-purple-100 h-24 flex items-center justify-center text-4xl">
+                  <div className="bg-gradient-to-br from-indigo-100 to-purple-100 aspect-[4/3] flex items-center justify-center text-4xl">
                     {pet.species === "cat" ? "🐱" : "🐶"}
                   </div>
                 )}

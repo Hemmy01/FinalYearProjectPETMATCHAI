@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient, verifyToken } from "@/lib/supabase"
 import { emailAccountStatus } from "@/lib/email"
+import { paystackRefund } from "@/lib/paystack"
 
 async function requireAdmin(token: string | null) {
   if (!token) return null
@@ -51,10 +52,18 @@ export async function GET(req: NextRequest) {
       .limit(100)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    // Attach any refundable (escrowed) payment tied to each dispute's offer.
+    // For each dispute's offer, attach any escrowed payment AND the underlying
+    // chat thread, so the admin can open the conversation straight from the tab.
     const disputes = data ?? []
     const offerIds = disputes.map((d) => d.offer_id).filter(Boolean)
     if (offerIds.length > 0) {
+      const { data: offers } = await db
+        .from("offers")
+        .select("id, pet_id, buyer_id, seller_id")
+        .in("id", offerIds)
+      const offerById = new Map((offers ?? []).map((o) => [o.id, o]))
+      const petIds = [...new Set((offers ?? []).map((o) => o.pet_id).filter(Boolean))]
+
       const { data: txs } = await db
         .from("transactions")
         .select("offer_id, reference, amount, status")
@@ -62,9 +71,39 @@ export async function GET(req: NextRequest) {
         .eq("status", "paid_escrow")
       const byOffer: Record<string, { reference: string; amount: number; status: string }> = {}
       for (const t of txs ?? []) byOffer[t.offer_id] = { reference: t.reference, amount: Number(t.amount), status: t.status }
-      for (const d of disputes) d.escrow = d.offer_id ? byOffer[d.offer_id] ?? null : null
+
+      let threads: { id: string; pet_id: string; buyer_id: string; seller_id: string }[] = []
+      if (petIds.length > 0) {
+        const { data: th } = await db.from("message_threads").select("id, pet_id, buyer_id, seller_id").in("pet_id", petIds)
+        threads = th ?? []
+      }
+
+      for (const d of disputes) {
+        d.escrow = d.offer_id ? byOffer[d.offer_id] ?? null : null
+        const o = d.offer_id ? offerById.get(d.offer_id) : null
+        const th = o ? threads.find((t) => t.pet_id === o.pet_id && t.buyer_id === o.buyer_id && t.seller_id === o.seller_id) : null
+        d.thread_id = th?.id ?? null
+      }
     }
     return NextResponse.json({ data: disputes })
+  }
+
+  // Admin read-only view of a disputed conversation (admin isn't a participant,
+  // so this is the only way for them to see the chat they're resolving).
+  if (type === "disputeThread") {
+    const threadId = sp.get("threadId")
+    if (!threadId) return NextResponse.json({ error: "threadId required" }, { status: 400 })
+    const { data: thread } = await db
+      .from("message_threads")
+      .select("id, pet:pets!message_threads_pet_id_fkey(name), buyer:profiles!message_threads_buyer_id_fkey(id, name), seller:profiles!message_threads_seller_id_fkey(id, name)")
+      .eq("id", threadId)
+      .single()
+    const { data: messages } = await db
+      .from("messages")
+      .select("id, sender_id, content, created_at")
+      .eq("thread_id", threadId)
+      .order("created_at", { ascending: true })
+    return NextResponse.json({ thread, messages: messages ?? [] })
   }
 
   if (type === "categories") {
@@ -236,24 +275,56 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (body.type === "resolveDispute") {
-    const { disputeId, resolution, refund } = body
+    const { disputeId, resolution } = body
+    // Admin can settle the escrow either way. `outcome` is the new field;
+    // the legacy `refund: true` boolean still maps to a buyer refund.
+    const outcome: "refund_buyer" | "release_seller" | "none" =
+      body.outcome ?? (body.refund ? "refund_buyer" : "none")
     if (!disputeId || !resolution) return NextResponse.json({ error: "disputeId and resolution required" }, { status: 400 })
 
-    // Optionally refund the escrowed payment tied to this dispute's offer.
-    let refunded = false
-    if (refund) {
+    // Settle the escrowed payment tied to this dispute's offer, in the admin's
+    // chosen direction — a real intervention for whichever party is in the right.
+    let settlement: "refunded" | "released" | null = null
+    if (outcome !== "none") {
       const { data: dispute } = await db.from("disputes").select("offer_id").eq("id", disputeId).single()
       if (dispute?.offer_id) {
         const { data: tx } = await db.from("transactions").select("*")
           .eq("offer_id", dispute.offer_id).eq("status", "paid_escrow").maybeSingle()
         if (tx) {
-          await db.from("transactions").update({ status: "refunded", updated_at: new Date().toISOString() }).eq("id", tx.id)
-          await db.from("pets").update({ status: "active" }).eq("id", tx.pet_id)
-          await db.from("notifications").insert([
-            { user_id: tx.buyer_id, type: "system", title: "Payment refunded", message: `Following a dispute, your escrow payment of ₦${Number(tx.amount).toLocaleString()} has been refunded.`, data: { transaction_id: tx.id, dispute_id: disputeId } },
-            { user_id: tx.seller_id, type: "system", title: "Escrow refunded", message: `An escrowed payment of ₦${Number(tx.amount).toLocaleString()} was refunded to the buyer following a dispute.`, data: { transaction_id: tx.id, dispute_id: disputeId } },
-          ])
-          refunded = true
+          if (outcome === "refund_buyer") {
+            // Reverse the charge at the gateway before recording the refund.
+            if (tx.provider === "paystack") {
+              const ok = await paystackRefund(tx.reference)
+              if (!ok) return NextResponse.json({ error: "Gateway refund could not be initiated. Please try again." }, { status: 502 })
+            }
+            await db.from("transactions").update({ status: "refunded", updated_at: new Date().toISOString() }).eq("id", tx.id)
+            await db.from("pets").update({ status: "active" }).eq("id", tx.pet_id)
+            await db.from("notifications").insert([
+              { user_id: tx.buyer_id, type: "system", title: "Payment refunded", message: `Following a dispute, your escrow payment of ₦${Number(tx.amount).toLocaleString()} has been refunded.`, data: { transaction_id: tx.id, dispute_id: disputeId } },
+              { user_id: tx.seller_id, type: "system", title: "Escrow refunded", message: `An escrowed payment of ₦${Number(tx.amount).toLocaleString()} was refunded to the buyer following a dispute.`, data: { transaction_id: tx.id, dispute_id: disputeId } },
+            ])
+            settlement = "refunded"
+          } else if (outcome === "release_seller") {
+            await db.from("transactions").update({ status: "released", released_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", tx.id)
+            await db.from("pets").update({ status: "sold" }).eq("id", tx.pet_id)
+            await db.from("notifications").insert([
+              { user_id: tx.seller_id, type: "system", title: "Funds released — sale complete ✅", message: `A dispute was resolved in your favour. ₦${Number(tx.amount).toLocaleString()} has been released to you.`, data: { transaction_id: tx.id, dispute_id: disputeId } },
+              { user_id: tx.buyer_id, type: "system", title: "Dispute resolved", message: `The dispute was resolved and the escrowed ₦${Number(tx.amount).toLocaleString()} was released to the seller.`, data: { transaction_id: tx.id, dispute_id: disputeId } },
+            ])
+            settlement = "released"
+          }
+        }
+      }
+    }
+
+    // Return the related chat thread to normal — the conflict is resolved.
+    {
+      const { data: d2 } = await db.from("disputes").select("offer_id").eq("id", disputeId).single()
+      if (d2?.offer_id) {
+        const { data: offer } = await db.from("offers").select("pet_id, buyer_id, seller_id").eq("id", d2.offer_id).single()
+        if (offer) {
+          await db.from("message_threads").update({ dispute_status: "resolved" })
+            .eq("pet_id", offer.pet_id).eq("buyer_id", offer.buyer_id).eq("seller_id", offer.seller_id)
         }
       }
     }
@@ -273,9 +344,9 @@ export async function PATCH(req: NextRequest) {
       action: "resolve_dispute",
       entity_type: "dispute",
       entity_id: disputeId,
-      details: { resolution: resolution.slice(0, 200), refunded },
+      details: { resolution: resolution.slice(0, 200), outcome, settlement },
     })
-    return NextResponse.json({ success: true, refunded })
+    return NextResponse.json({ success: true, settlement, refunded: settlement === "refunded" })
   }
 
   return NextResponse.json({ error: "Unknown type" }, { status: 400 })

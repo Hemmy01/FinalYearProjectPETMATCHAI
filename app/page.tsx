@@ -49,7 +49,7 @@ export default async function Home() {
         <div className="text-6xl mb-4">🐾</div>
         <h1 className="text-4xl font-bold text-gray-900 mb-3">Find Your Perfect Pet Match</h1>
         <p className="text-lg text-gray-500 mb-8 max-w-xl mx-auto">
-          AI-powered matchmaking connecting pet buyers and sellers based on your preferences — powered by Groq.
+          AI-powered matchmaking connecting pet buyers and sellers based on your preferences and live market data.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Link href="/listings" className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-indigo-700">
@@ -67,7 +67,7 @@ export default async function Home() {
           { label: "Active Listings", value: stats.pets > 0 ? `${stats.pets}` : "—" },
           { label: "Registered Users", value: stats.users > 0 ? `${stats.users}` : "—" },
           { label: "AI Matches Made", value: "Live" },
-          { label: "Powered by", value: "Groq ⚡" },
+          { label: "Powered by", value: "Smart Engine ⚡" },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4 text-center">
             <p className="text-2xl font-bold text-indigo-600">{s.value}</p>
@@ -114,7 +114,7 @@ export default async function Home() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
           {[
             { icon: "📝", title: "Create Profile", desc: "Register and set your pet preferences or list your pets for sale." },
-            { icon: "🤖", title: "AI Matching", desc: "Groq AI analyzes your preferences and finds the best compatible pets instantly." },
+            { icon: "🤖", title: "Smart Matching", desc: "Our matching engine analyzes your preferences and live market data to find the best compatible pets instantly." },
             { icon: "🤝", title: "Connect & Adopt", desc: "Message sellers, make offers, and find your perfect companion." },
           ].map((step) => (
             <div key={step.title}>

@@ -2,10 +2,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { MapPin, Heart, CheckCircle, ShieldCheck, Scale } from "lucide-react";
+import { MapPin, Heart, CheckCircle, Scale } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
 import { useCompare } from "@/lib/compare-context";
+import VerifiedBadge from "@/components/VerifiedBadge";
 
 export type PetCardData = {
   id: string;
@@ -91,13 +92,8 @@ export default function PetCard({ pet }: { pet: PetCardData }) {
           </div>
         )}
 
-        {/* Top-left: verified + status badges */}
+        {/* Top-left: status badge */}
         <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
-          {pet.seller?.is_verified && (
-            <span className="inline-flex items-center gap-0.5 bg-blue-600/90 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none backdrop-blur-sm">
-              <ShieldCheck size={9} /> Verified Seller
-            </span>
-          )}
           {pet.status && pet.status !== "active" && (
             <span
               className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none capitalize ${
@@ -173,7 +169,10 @@ export default function PetCard({ pet }: { pet: PetCardData }) {
         </p>
 
         {sellerName && (
-          <p className="text-xs text-gray-400 truncate mb-2">{sellerName}</p>
+          <p className="text-xs text-gray-400 mb-2 flex items-center gap-1 min-w-0">
+            <span className="truncate">{sellerName}</span>
+            {pet.seller?.is_verified && <VerifiedBadge size={12} />}
+          </p>
         )}
 
         <div className="flex items-center gap-1 text-xs text-gray-400 mb-3">

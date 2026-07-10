@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { List, Eye, MessageSquare, PlusCircle, ChevronRight, Bell, Loader2, Star, Pencil, CheckSquare, Trash2, Megaphone, MapPin, ShieldCheck } from "lucide-react";
 import StatCard from "@/components/StatCard";
+import VerifiedBadge from "@/components/VerifiedBadge";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
 
@@ -86,7 +87,10 @@ export default function SellerDashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-gray-500 uppercase tracking-wide">Seller Dashboard</p>
-          <h1 className="text-xl font-bold text-gray-900">{user.name ?? "My Store"} 🏪</h1>
+          <h1 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">
+            {user.name ?? "My Store"}
+            {user.is_verified && <VerifiedBadge size={18} />}
+          </h1>
         </div>
         <Link href="/notifications" className="relative p-2 bg-white border border-gray-200 rounded-xl">
           <Bell size={20} className="text-gray-600" />

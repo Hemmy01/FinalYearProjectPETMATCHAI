@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server"
 import { createAdminClient, verifyToken } from "@/lib/supabase"
-import { generateRecommendations, computeBatchMatchScores } from "@/lib/groq"
+import { generateRecommendations } from "@/lib/groq"
+import { scoreMatch, computeMarketStats } from "@/lib/matching"
 
 type PoolPet = {
   id: string; name: string; species: string; breed: string; age_months: number
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
   const { user } = await verifyToken(token!)
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const [{ data: prefs }, { data: buyerProfile }, savesRes, savedDetailRes, matchRowsRes, viewRes, poolRes] = await Promise.all([
+  const [{ data: prefs }, { data: buyerProfile }, savesRes, savedDetailRes, matchRowsRes, viewRes, poolRes, marketRes] = await Promise.all([
     db.from("buyer_preferences").select("*").eq("user_id", user.id).single(),
     db.from("profiles").select("location").eq("id", user.id).single(),
     db.from("saved_pets").select("pet_id").eq("user_id", user.id).then(({ data }) => new Set((data ?? []).map((r: { pet_id: string }) => r.pet_id))),
@@ -47,6 +48,7 @@ export async function GET(req: NextRequest) {
     db.from("ai_matches").select("pet_id, feedback, match_status, pet:pets(species, breed)").eq("buyer_id", user.id),
     db.from("pet_views").select("pet:pets(id, name, species, breed, price)").eq("user_id", user.id).order("viewed_at", { ascending: false }).limit(1).maybeSingle(),
     db.from("pets").select(`*, seller:profiles!pets_seller_id_fkey(id, name, is_verified)`).eq("status", "active").limit(60),
+    db.from("pets").select("species, breed, price").eq("status", "active"),
   ])
 
   const buyerPrefs = {
@@ -73,7 +75,6 @@ export async function GET(req: NextRequest) {
     }
     if (row.match_status === "declined") dismissedPetIds.add(row.pet_id)
   }
-  const feedbackContext = { liked: Array.from(liked), disliked: Array.from(disliked) }
 
   let query = db.from("pets").select(`
     *,
@@ -102,50 +103,29 @@ export async function GET(req: NextRequest) {
     .in("pet_id", petList.map((p) => p.id))
   const cached = new Map((cachedRows ?? []).map((s: { pet_id: string; score: number; reasons: string[]; feedback: string | null }) => [s.pet_id, s]))
 
-  const uncached = petList.filter((p) => !cached.has(p.id))
-  let batchScores = new Map<string, { score: number; reasons: string[] }>()
-  if (uncached.length > 0) {
-    try {
-      batchScores = await computeBatchMatchScores(
-        buyerPrefs,
-        uncached.map((p) => ({
-          id: p.id,
-          name: p.name,
-          species: p.species,
-          breed: p.breed,
-          age_months: p.age_months,
-          gender: p.gender,
-          price: p.price,
-          location: p.location,
-          vaccinated: p.vaccinated,
-          dewormed: p.dewormed,
-          description: p.description ?? "",
-          views: p.views ?? 0,
-          saves: savesRes.has(p.id) ? 1 : 0,
-        })),
-        feedbackContext
-      )
-      const toCache = Array.from(batchScores.entries()).map(([petId, { score, reasons }]) => ({
-        buyer_id: user.id,
-        pet_id: petId,
-        score,
-        reasons,
-        updated_at: new Date().toISOString(),
-      }))
-      if (toCache.length > 0) {
-        after(() => db.from("ai_matches").upsert(toCache, { onConflict: "buyer_id,pet_id" }))
-      }
-    } catch {
-      // Fall back to 50 for all uncached
-    }
+  // Real market-price benchmarks from live listings.
+  const market = computeMarketStats((marketRes.data ?? []) as { species: string; breed: string; price: number }[])
+  const behavior = {
+    likedKeys: new Set(Array.from(liked).map((s) => s.toLowerCase())),
+    dislikedKeys: new Set(Array.from(disliked).map((s) => s.toLowerCase())),
+    savedPetIds: savesRes,
   }
 
+  // Deterministically score each pet from this buyer's real data + real market.
   const petsWithScores = petList.map((pet) => {
-    const score = cached.get(pet.id)?.score ?? batchScores.get(pet.id)?.score ?? 50
-    const reasons = cached.get(pet.id)?.reasons ?? batchScores.get(pet.id)?.reasons ?? []
-    const feedback = cached.get(pet.id)?.feedback ?? null
-    return { ...pet, matchScore: score, matchReasons: reasons, feedback }
+    const r = scoreMatch(buyerPrefs, {
+      id: pet.id, species: pet.species, breed: pet.breed, age_months: pet.age_months,
+      gender: pet.gender, price: pet.price, location: pet.location,
+      vaccinated: pet.vaccinated, dewormed: pet.dewormed, microchipped: pet.microchipped,
+      views: pet.views ?? 0,
+    }, behavior, market)
+    return { ...pet, matchScore: r.score, matchReasons: r.reasons, matchBreakdown: r.breakdown, matchCategories: r.categories, feedback: cached.get(pet.id)?.feedback ?? null }
   })
+
+  after(() => db.from("ai_matches").upsert(
+    petsWithScores.map((p) => ({ buyer_id: user.id, pet_id: p.id, score: p.matchScore, reasons: p.matchReasons, updated_at: new Date().toISOString() })),
+    { onConflict: "buyer_id,pet_id" }
+  ))
 
   petsWithScores.sort((a, b) => b.matchScore - a.matchScore)
   const topPets = petsWithScores.slice(0, 6)

@@ -192,7 +192,7 @@ function ReviewForm({ offer, onDone }: { offer: Offer; onDone: () => void }) {
   );
 }
 
-function DisputeForm({ offer, onDone }: { offer: Offer; onDone: () => void }) {
+function DisputeForm({ offer, currentUserId, onDone }: { offer: Offer; currentUserId: string; onDone: () => void }) {
   const SUBJECTS = [
     "Payment not received",
     "Pet condition not as described",
@@ -214,9 +214,8 @@ function DisputeForm({ offer, onDone }: { offer: Offer; onDone: () => void }) {
     if (!finalSubject) { setError("Please describe the issue."); return; }
     setError("");
     setSubmitting(true);
-    const respondentId = offer.seller_id === offer.buyer_id
-      ? offer.seller_id
-      : offer.seller_id;
+    // The respondent is always the OTHER party to this offer — whoever isn't filing.
+    const respondentId = offer.seller_id === currentUserId ? offer.buyer_id : offer.seller_id;
     const res = await api.post("/api/disputes", {
       respondentId,
       offerId: offer.id,
@@ -541,6 +540,7 @@ export default function OffersPage() {
                       {showDispute[offer.id] && (
                         <DisputeForm
                           offer={offer}
+                          currentUserId={user.id}
                           onDone={() => setShowDispute((prev) => ({ ...prev, [offer.id]: false }))}
                         />
                       )}
@@ -549,7 +549,25 @@ export default function OffersPage() {
 
                   {/* ── Seller: accepted → escrow status ── */}
                   {isSeller && offer.status === "accepted" && (
-                    <PaymentPanel offer={offer} isSeller={true} />
+                    <div>
+                      <PaymentPanel offer={offer} isSeller={true} />
+                      <div className="flex gap-2 flex-wrap mt-3">
+                        {!showDispute[offer.id] && (
+                          <button
+                            onClick={() => setShowDispute((prev) => ({ ...prev, [offer.id]: true }))}
+                            className="flex items-center gap-1.5 text-xs text-red-500 border border-red-200 px-3 py-1.5 rounded-xl hover:bg-red-50">
+                            <AlertTriangle size={12} /> Report an Issue
+                          </button>
+                        )}
+                      </div>
+                      {showDispute[offer.id] && (
+                        <DisputeForm
+                          offer={offer}
+                          currentUserId={user.id}
+                          onDone={() => setShowDispute((prev) => ({ ...prev, [offer.id]: false }))}
+                        />
+                      )}
+                    </div>
                   )}
 
                   {/* ── Buyer: countered ── */}

@@ -4,6 +4,7 @@ import { Loader2, Plus, Trash2, ToggleLeft, ToggleRight, MapPin, Megaphone, Mess
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
 import Link from "next/link";
+import LocationSelect from "@/components/LocationSelect";
 
 type WantAd = {
   id: string;
@@ -288,8 +289,7 @@ export default function WantAdsPage() {
 
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Location Preference</label>
-            <input value={location} onChange={(e) => setLocation(e.target.value)} className={inp}
-              placeholder="e.g. Lagos, Nigeria" />
+            <LocationSelect value={location} onChange={setLocation} />
           </div>
 
           <div>

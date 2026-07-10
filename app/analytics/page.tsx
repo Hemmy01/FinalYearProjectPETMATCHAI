@@ -4,6 +4,7 @@ import { TrendingUp, BarChart2, Users, List, Loader2, RefreshCw, Printer, Downlo
 import StatCard from "@/components/StatCard";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
+import type { DemandForecast, PriceBand } from "@/lib/forecast";
 
 type BreedStat = { breed: string; avgPrice: number; count: number };
 type SellerData = {
@@ -26,6 +27,8 @@ export default function AnalyticsPage() {
   const [geoData, setGeoData] = useState<{ location: string; count: number }[]>([]);
   const [aiSummary, setAiSummary] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [forecast, setForecast] = useState<DemandForecast | null>(null);
+  const [priceBands, setPriceBands] = useState<PriceBand[]>([]);
 
   // Custom report builder state
   const [reportOpen, setReportOpen] = useState(false);
@@ -45,13 +48,16 @@ export default function AnalyticsPage() {
       user?.role === "seller" || user?.role === "administrator"
         ? api.get(`/api/analytics?sellerId=${user.id}`)
         : Promise.resolve({ data: null }),
+      api.get("/api/analytics?forecast=true").catch(() => null),
     ];
     if (user?.role === "administrator") {
       requests.push(api.get("/api/analytics?geo=true"));
     }
-    const [pubRes, selRes, geoRes] = await Promise.all(requests);
+    const [pubRes, selRes, fcRes, geoRes] = await Promise.all(requests);
     setPlatform(pubRes.data ?? null);
     setSeller(selRes.data ?? null);
+    setForecast(fcRes?.forecast ?? null);
+    setPriceBands(fcRes?.priceBands ?? []);
     if (geoRes) setGeoData(geoRes.data ?? []);
     setLoading(false);
   }
@@ -215,6 +221,104 @@ export default function AnalyticsPage() {
           </div>
         )}
       </div>
+
+      {/* Demand Trends & Forecast */}
+      {forecast && (() => {
+        const cols = forecast.listings.map((p, i) => ({
+          label: p.label,
+          listings: p.count,
+          offers: forecast.offers[i]?.count ?? 0,
+          projected: false,
+        }));
+        const proj = {
+          label: "Next",
+          listings: forecast.projection.listings ?? 0,
+          offers: forecast.projection.offers ?? 0,
+          projected: true,
+        };
+        const hasProjection = forecast.projection.offers !== null || forecast.projection.listings !== null;
+        const all = hasProjection ? [...cols, proj] : cols;
+        const maxVal = Math.max(1, ...all.flatMap((c) => [c.listings, c.offers]));
+        const mo = forecast.momentum;
+        const moStyle =
+          mo === "rising" ? { cls: "bg-green-50 text-green-700", txt: "▲ Rising demand" } :
+          mo === "falling" ? { cls: "bg-red-50 text-red-600", txt: "▼ Cooling demand" } :
+          mo === "flat" ? { cls: "bg-gray-100 text-gray-600", txt: "→ Steady demand" } :
+          { cls: "bg-gray-100 text-gray-400", txt: "Not enough data yet" };
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                <TrendingUp size={16} className="text-indigo-600" /> Demand Trends &amp; Forecast
+              </h2>
+              <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${moStyle.cls}`}>{moStyle.txt}</span>
+            </div>
+            <p className="text-xs text-gray-400 mb-4">New listings vs. buyer offers over the last 6 months · projected next month</p>
+
+            {/* Legend */}
+            <div className="flex items-center gap-4 mb-3 text-xs text-gray-500">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-indigo-500" /> New listings</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-green-500" /> Buyer offers</span>
+              {hasProjection && <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-indigo-300 border border-dashed border-indigo-400" /> Forecast</span>}
+            </div>
+
+            <div className="flex items-end gap-3 h-40">
+              {all.map((c) => (
+                <div key={c.label} className={`flex-1 flex flex-col items-center gap-1 ${c.projected ? "opacity-90" : ""}`}>
+                  <div className="flex items-end gap-1 h-32 w-full justify-center">
+                    <div className={`w-1/2 max-w-[18px] rounded-t-sm ${c.projected ? "bg-indigo-300 border border-dashed border-indigo-400" : "bg-indigo-500"}`}
+                      style={{ height: `${Math.max(3, (c.listings / maxVal) * 100)}%` }} title={`${c.listings} listings`} />
+                    <div className={`w-1/2 max-w-[18px] rounded-t-sm ${c.projected ? "bg-green-300 border border-dashed border-green-400" : "bg-green-500"}`}
+                      style={{ height: `${Math.max(3, (c.offers / maxVal) * 100)}%` }} title={`${c.offers} offers`} />
+                  </div>
+                  <span className={`text-[10px] text-center truncate w-full ${c.projected ? "font-semibold text-indigo-500" : "text-gray-400"}`}>{c.label}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              {forecast.peakDemandMonth && (
+                <div className="flex gap-2 p-3 rounded-lg bg-indigo-50 text-indigo-800">
+                  <span>📈</span>
+                  <span>Peak buyer interest was <strong>{forecast.peakDemandMonth.label}</strong> ({forecast.peakDemandMonth.count} events) — a seasonal window to prioritise.</span>
+                </div>
+              )}
+              {hasProjection && (
+                <div className="flex gap-2 p-3 rounded-lg bg-green-50 text-green-800">
+                  <span>🔮</span>
+                  <span>Forecast next month: <strong>~{forecast.projection.offers ?? 0} offers</strong> and <strong>~{forecast.projection.listings ?? 0} new listings</strong>, projected from the current trend.</span>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Price Optimisation */}
+      {priceBands.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2 mb-1">
+            <Percent size={16} className="text-indigo-600" /> Price Optimisation
+          </h2>
+          <p className="text-xs text-gray-400 mb-4">Suggested competitive price bands, computed from real market listings and time-to-sell</p>
+          <div className="space-y-3">
+            {priceBands.slice(0, 6).map((b) => (
+              <div key={b.breed} className="border border-gray-100 rounded-lg p-3">
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+                  <span className="font-semibold text-gray-900">{b.breed}</span>
+                  <span className="text-xs text-gray-400">{b.count} listing{b.count !== 1 ? "s" : ""}{b.soldCount > 0 ? ` · ${b.soldCount} sold` : ""}</span>
+                </div>
+                <div className="flex items-baseline gap-2 mb-1.5">
+                  <span className="text-sm text-gray-500">Suggested:</span>
+                  <span className="text-base font-bold text-green-600">₦{b.suggestedMin.toLocaleString()}–₦{b.suggestedMax.toLocaleString()}</span>
+                  <span className="text-xs text-gray-400">(market avg ₦{b.marketAvg.toLocaleString()})</span>
+                </div>
+                <p className="text-xs text-gray-600">{b.insight}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Geographic user distribution — admin only */}
       {isAdmin && geoData.length > 0 && (

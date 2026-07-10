@@ -31,7 +31,7 @@ export default function PrivacyPage() {
           <h2 className="text-lg font-semibold text-gray-900 mb-2">3. How We Use Your Data</h2>
           <ul className="list-disc pl-5 space-y-1">
             <li>To operate the platform and facilitate buyer-seller connections</li>
-            <li>To power AI-based pet matching and personalised recommendations via Groq</li>
+            <li>To score pet matches on our own servers, and to generate AI recommendation summaries via Groq</li>
             <li>To send transactional notifications (new messages, offer updates, listing status)</li>
             <li>To moderate listings and verify seller authenticity</li>
             <li>To generate aggregate analytics for sellers (views, inquiries — never shared with buyers)</li>
@@ -56,7 +56,7 @@ export default function PrivacyPage() {
           <p>We do <strong>not</strong> sell your personal data. We share limited data with:</p>
           <ul className="list-disc pl-5 space-y-1 mt-2">
             <li><strong>Supabase (Ireland/USA):</strong> database and file storage — GDPR-compliant infrastructure</li>
-            <li><strong>Groq Inc. (USA):</strong> AI match scoring — only anonymised pet preference data is sent, no personal identifiers</li>
+            <li><strong>Groq Inc. (USA):</strong> AI text generation for recommendation summaries and analytics — only anonymised, aggregated data is sent, no personal identifiers. Match scoring itself runs on our own servers and is never sent to Groq.</li>
             <li><strong>Other users:</strong> only the data visible in your public profile and listings</li>
           </ul>
         </section>

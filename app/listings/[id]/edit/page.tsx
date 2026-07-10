@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import ImageUpload from "@/components/ImageUpload";
 import VideoUpload from "@/components/VideoUpload";
+import LocationSelect from "@/components/LocationSelect";
 
 const SPECIES = ["dog", "cat", "other"] as const;
 const GENDERS = ["male", "female"] as const;
@@ -309,7 +310,7 @@ export default function EditListingPage({ params }: { params: Promise<{ id: stri
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Location *</label>
-              <input value={location} onChange={(e) => setLocation(e.target.value)} className={inp} placeholder="Lagos, Nigeria" />
+              <LocationSelect value={location} onChange={setLocation} required />
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm text-gray-700 mt-3 cursor-pointer select-none">

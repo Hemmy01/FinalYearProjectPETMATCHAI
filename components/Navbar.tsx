@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, MessageSquare, Home, Search, Heart, BarChart2, Shield, User, PlusCircle, Zap, LogOut, Menu, X, Tag, Bookmark, Megaphone } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/lib/toast-context";
 import { api } from "@/lib/api-client";
@@ -45,15 +45,27 @@ export default function Navbar() {
   const pathnameRef = useRef(pathname);
   useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
 
-  useEffect(() => {
+  // Authoritative unread count straight from the DB — the single source of truth
+  // for the bell badge, so it always matches the notifications list. Debounced so
+  // a "mark all as read" (one Realtime event per row) collapses into one query.
+  const unreadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshUnread = useCallback(() => {
     if (!user) { setUnread(0); return; }
-    supabase
-      .from("notifications")
-      .select("id", { count: "exact" })
-      .eq("user_id", user.id)
-      .eq("is_read", false)
-      .then(({ count }) => setUnread(count ?? 0));
+    if (unreadTimer.current) clearTimeout(unreadTimer.current);
+    unreadTimer.current = setTimeout(() => {
+      supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("is_read", false)
+        .then(({ count }) => setUnread(count ?? 0));
+    }, 200);
   }, [user]);
+  useEffect(() => () => { if (unreadTimer.current) clearTimeout(unreadTimer.current); }, []);
+
+  // Initial load + re-sync on every navigation, so reading notifications (which
+  // marks them read in the DB) brings the bell badge back in line with reality.
+  useEffect(() => { refreshUnread(); }, [refreshUnread, pathname]);
 
   // Unread message count for the Messages nav badge — refreshed on navigation.
   useEffect(() => {
@@ -83,6 +95,13 @@ export default function Navbar() {
             message: n.message ?? undefined,
           });
         }
+      )
+      .on(
+        // When notifications are marked read (single or "mark all"), re-sync the
+        // badge from the DB so it clears live, without needing a navigation/reload.
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+        () => refreshUnread()
       )
       .subscribe();
     return () => { void supabase.removeChannel(channel); };

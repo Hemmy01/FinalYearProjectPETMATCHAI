@@ -1,6 +1,7 @@
 "use client";
 import { use, useEffect, useRef, useState } from "react";
-import { MapPin, CheckCircle, MessageSquare, Heart, Share2, Star, Loader2, ArrowLeft, Pencil, Layers, ThumbsUp, ShieldCheck, ChevronLeft, ChevronRight, Play, Check, ImagePlus, X as XIcon } from "lucide-react";
+import { MapPin, CheckCircle, MessageSquare, Heart, Share2, Star, Loader2, ArrowLeft, Pencil, Layers, ThumbsUp, ChevronLeft, ChevronRight, Play, Check, ImagePlus, X as XIcon } from "lucide-react";
+import VerifiedBadge from "@/components/VerifiedBadge";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { api } from "@/lib/api-client";
@@ -510,13 +511,6 @@ export default function PetDetailPage({ params }: { params: Promise<{ id: string
             <MapPin size={14} /> {pet.location}
           </div>
 
-          {/* Verified Seller badge */}
-          {pet.seller?.is_verified && (
-            <div className="flex items-center gap-1.5 bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full mb-3 w-fit">
-              <ShieldCheck size={13} /> Verified Seller
-            </div>
-          )}
-
           {/* Health badges */}
           <div className="flex flex-wrap gap-2 mb-4">
             {pet.vaccinated && (
@@ -561,11 +555,7 @@ export default function PetDetailPage({ params }: { params: Promise<{ id: string
                 {pet.seller.name[0]}
               </div>
               <span>{pet.seller.name}</span>
-              {pet.seller.is_verified && (
-                <span className="flex items-center gap-0.5 text-xs text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">
-                  <CheckCircle size={10} /> Verified
-                </span>
-              )}
+              {pet.seller.is_verified && <VerifiedBadge size={15} />}
             </div>
           )}
 
@@ -621,6 +611,8 @@ export default function PetDetailPage({ params }: { params: Promise<{ id: string
 
         {tab === "details" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Contact + offer forms — hidden on your own listing (you can't message/offer yourself) */}
+            {user?.id !== pet.seller?.id && (<>
             {/* Message form */}
             <div className="bg-white rounded-xl border border-gray-200 p-4">
               <h3 className="font-semibold text-gray-900 mb-3">Send Inquiry</h3>
@@ -678,6 +670,7 @@ export default function PetDetailPage({ params }: { params: Promise<{ id: string
                 </>
               )}
             </div>
+            </>)}
 
             {/* Extra details */}
             {(pet.registration_info || pet.pedigree) && (
