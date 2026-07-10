@@ -19,3 +19,16 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Respect users who prefer reduced motion: near-eliminate animations,
+   transitions and scroll-driven motion while keeping content usable. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
