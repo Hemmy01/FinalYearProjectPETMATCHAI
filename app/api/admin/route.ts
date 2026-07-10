@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
       .single()
     const { data: messages } = await db
       .from("messages")
-      .select("id, sender_id, content, created_at")
+      .select("id, sender_id, content, created_at, message_type")
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true })
     return NextResponse.json({ thread, messages: messages ?? [] })
@@ -317,14 +317,35 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // Return the related chat thread to normal — the conflict is resolved.
+    // Return the related chat thread to normal and post the ruling INTO the chat,
+    // so both parties see the admin's decision where the conflict happened.
     {
       const { data: d2 } = await db.from("disputes").select("offer_id").eq("id", disputeId).single()
       if (d2?.offer_id) {
         const { data: offer } = await db.from("offers").select("pet_id, buyer_id, seller_id").eq("id", d2.offer_id).single()
         if (offer) {
-          await db.from("message_threads").update({ dispute_status: "resolved" })
+          const { data: thread } = await db.from("message_threads")
+            .update({ dispute_status: "resolved" })
             .eq("pet_id", offer.pet_id).eq("buyer_id", offer.buyer_id).eq("seller_id", offer.seller_id)
+            .select("id")
+            .maybeSingle()
+          if (thread) {
+            const settlementLine = settlement === "refunded"
+              ? "\n\nOutcome: the escrowed payment has been refunded to the buyer."
+              : settlement === "released"
+              ? "\n\nOutcome: the escrowed payment has been released to the seller."
+              : ""
+            const decision = `${resolution}${settlementLine}`
+            await db.from("messages").insert({
+              thread_id: thread.id,
+              sender_id: admin.id,
+              content: decision,
+              message_type: "admin_decision",
+            })
+            await db.from("message_threads")
+              .update({ last_message: "🛡️ Admin decision", last_message_at: new Date().toISOString() })
+              .eq("id", thread.id)
+          }
         }
       }
     }
@@ -347,6 +368,43 @@ export async function PATCH(req: NextRequest) {
       details: { resolution: resolution.slice(0, 200), outcome, settlement },
     })
     return NextResponse.json({ success: true, settlement, refunded: settlement === "refunded" })
+  }
+
+  // Admin posts an instruction into a disputed conversation. The admin is not a
+  // thread participant, so this goes through the service-role client here.
+  if (body.type === "disputeMessage") {
+    const { threadId, content } = body
+    if (!threadId || !content?.trim()) {
+      return NextResponse.json({ error: "threadId and content required" }, { status: 400 })
+    }
+    const { data: thread } = await db.from("message_threads")
+      .select("id, buyer_id, seller_id, pet:pets!message_threads_pet_id_fkey(name)")
+      .eq("id", threadId)
+      .single()
+    if (!thread) return NextResponse.json({ error: "Thread not found" }, { status: 404 })
+
+    const { data: message, error: msgErr } = await db.from("messages")
+      .insert({ thread_id: threadId, sender_id: admin.id, content: content.trim(), message_type: "admin_note" })
+      .select("id, sender_id, content, created_at, message_type")
+      .single()
+    if (msgErr) return NextResponse.json({ error: msgErr.message }, { status: 500 })
+
+    await db.from("message_threads")
+      .update({ last_message: "🛡️ Admin: " + content.trim().slice(0, 60), last_message_at: new Date().toISOString() })
+      .eq("id", threadId)
+
+    const petName = (thread.pet as { name?: string } | null)?.name ?? "your transaction"
+    await db.from("notifications").insert(
+      [thread.buyer_id, thread.seller_id].map((uid) => ({
+        user_id: uid,
+        type: "message",
+        title: "Message from PetMatch Admin",
+        message: `An admin has posted in your dispute about ${petName}: ${content.trim().slice(0, 80)}`,
+        data: { thread_id: threadId },
+      }))
+    )
+
+    return NextResponse.json({ success: true, data: message })
   }
 
   return NextResponse.json({ error: "Unknown type" }, { status: 400 })

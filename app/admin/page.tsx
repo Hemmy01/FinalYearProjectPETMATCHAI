@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Users, List, AlertTriangle, CheckCircle, XCircle, Shield, Loader2, RefreshCw, Star, Trash2, Brain, Zap, Download, Search, Filter, Gavel, Tag, MessageSquare, X } from "lucide-react";
+import { Users, List, AlertTriangle, CheckCircle, XCircle, Shield, Loader2, RefreshCw, Star, Trash2, Brain, Zap, Download, Search, Filter, Gavel, Tag, MessageSquare, X, Send } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
@@ -22,8 +22,8 @@ type UserRow = { id: string; name: string; email: string; role: string; location
 type PetRow = { id: string; name: string; breed: string; price: number; status: string; seller: { name: string } | null };
 type AuditRow = { id: string; action: string; entity_type: string; created_at: string; user: { name: string; email: string } | null; details: Record<string, unknown> };
 type DisputeRow = { id: string; subject: string; description: string; status: string; created_at: string; offer_id?: string | null; thread_id?: string | null; escrow?: { reference: string; amount: number; status: string } | null; reporter: { name: string; email: string } | null; respondent: { name: string; email: string } | null };
-type ConvoMsg = { id: string; sender_id: string; content: string; created_at: string };
-type ConvoState = { open: boolean; loading: boolean; subject: string; thread: { pet: { name: string } | null; buyer: { id: string; name: string } | null; seller: { id: string; name: string } | null } | null; messages: ConvoMsg[] };
+type ConvoMsg = { id: string; sender_id: string; content: string; created_at: string; message_type?: string };
+type ConvoState = { open: boolean; loading: boolean; subject: string; thread: { id: string; pet: { name: string } | null; buyer: { id: string; name: string } | null; seller: { id: string; name: string } | null } | null; messages: ConvoMsg[] };
 
 function timeAgo(iso: string) {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -70,10 +70,25 @@ export default function AdminPage() {
   const [resolveOutcome, setResolveOutcome] = useState<"none" | "refund_buyer" | "release_seller">("none");
   const [convo, setConvo] = useState<ConvoState | null>(null);
 
+  const [adminMsg, setAdminMsg] = useState("");
+  const [adminMsgSending, setAdminMsgSending] = useState(false);
+
   async function openConversation(threadId: string, subject: string) {
+    setAdminMsg("");
     setConvo({ open: true, loading: true, subject, thread: null, messages: [] });
     const res = await api.get(`/api/admin?type=disputeThread&threadId=${threadId}`);
     setConvo({ open: true, loading: false, subject, thread: res.thread ?? null, messages: res.messages ?? [] });
+  }
+
+  async function sendAdminInstruction() {
+    if (!convo?.thread?.id || !adminMsg.trim() || adminMsgSending) return;
+    setAdminMsgSending(true);
+    const res = await api.patch("/api/admin", { type: "disputeMessage", threadId: convo.thread.id, content: adminMsg.trim() });
+    if (res.data) {
+      setConvo((prev) => (prev ? { ...prev, messages: [...prev.messages, res.data] } : prev));
+      setAdminMsg("");
+    }
+    setAdminMsgSending(false);
   }
 
   // Categories search
@@ -1113,6 +1128,20 @@ export default function AdminPage() {
                 <p className="text-sm text-gray-400 text-center py-10">No messages in this conversation.</p>
               ) : (
                 convo.messages.map((m) => {
+                  if (m.message_type === "admin_note" || m.message_type === "admin_decision") {
+                    const isDecision = m.message_type === "admin_decision";
+                    return (
+                      <div key={m.id} className="flex justify-center">
+                        <div className={`max-w-[90%] rounded-xl px-3 py-2 text-sm border ${isDecision ? "bg-amber-50 border-amber-300 text-amber-900" : "bg-indigo-50 border-indigo-200 text-indigo-900"}`}>
+                          <p className="text-[10px] font-bold uppercase tracking-wide mb-0.5 flex items-center gap-1">
+                            <Shield size={11} /> {isDecision ? "Admin decision" : "You (Admin)"}
+                          </p>
+                          <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                          <p className="text-[10px] mt-1 opacity-70">{new Date(m.created_at).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    );
+                  }
                   const isBuyer = m.sender_id === convo.thread?.buyer?.id;
                   const name = isBuyer ? convo.thread?.buyer?.name : convo.thread?.seller?.name;
                   return (
@@ -1127,7 +1156,29 @@ export default function AdminPage() {
                 })
               )}
             </div>
-            <div className="px-5 py-2 border-t border-gray-100 text-[11px] text-gray-400 text-center">Read-only admin view</div>
+            {!convo.loading && convo.thread && (
+              <div className="px-4 py-3 border-t border-gray-100 bg-white">
+                <p className="text-[11px] text-gray-400 mb-1.5 flex items-center gap-1"><Shield size={11} className="text-indigo-500" /> Post an instruction — both parties see it as PetMatch Admin.</p>
+                <div className="flex items-end gap-2">
+                  <textarea
+                    value={adminMsg}
+                    onChange={(e) => setAdminMsg(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAdminInstruction(); } }}
+                    rows={2}
+                    placeholder="Give the buyer and seller instructions…"
+                    className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    onClick={sendAdminInstruction}
+                    disabled={!adminMsg.trim() || adminMsgSending}
+                    className="shrink-0 bg-indigo-600 text-white rounded-xl px-3 py-2.5 text-sm font-semibold flex items-center gap-1 disabled:opacity-50 hover:bg-indigo-700 transition-colors"
+                  >
+                    {adminMsgSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1.5">To post the <span className="font-medium text-amber-700">final decision</span>, use “Resolve” on the dispute — it’s recorded in this chat for both parties.</p>
+              </div>
+            )}
           </div>
         </div>
       )}

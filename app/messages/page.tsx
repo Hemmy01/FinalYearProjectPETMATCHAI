@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { Send, Loader2, MessageSquare, Flag, Search, Archive, ArchiveRestore, CheckCheck, Check, Clock, AlertCircle, RotateCw, Video } from "lucide-react";
+import { Send, Loader2, MessageSquare, Flag, Search, Archive, ArchiveRestore, CheckCheck, Check, Clock, AlertCircle, RotateCw, Video, Shield } from "lucide-react";
 import VideoCallModal from "@/components/VideoCallModal";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
@@ -34,6 +34,7 @@ type Message = {
   is_read: boolean;
   delivered_at?: string | null;
   created_at: string;
+  message_type?: string;   // 'text' | 'admin_note' | 'admin_decision'
   sender: { id: string; name: string } | null;
   pending?: boolean;   // send in flight (optimistic)
   failed?: boolean;    // send failed — offer retry
@@ -149,11 +150,12 @@ export default function MessagesPage() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages", filter: `thread_id=eq.${activeThread.id}` },
         (payload) => {
-          const raw = payload.new as { id: string; thread_id: string; sender_id: string; content: string; is_read: boolean; created_at: string };
+          const raw = payload.new as { id: string; thread_id: string; sender_id: string; content: string; is_read: boolean; created_at: string; message_type?: string };
           if (raw.sender_id === user.id) return;
+          const isAdmin = raw.message_type === "admin_note" || raw.message_type === "admin_decision";
           setMessages((prev) => {
             if (prev.some((m) => m.id === raw.id)) return prev;
-            return [...prev, { id: raw.id, thread_id: raw.thread_id, sender_id: raw.sender_id, content: raw.content, is_read: raw.is_read, created_at: raw.created_at, sender: { id: raw.sender_id, name: otherName } }];
+            return [...prev, { id: raw.id, thread_id: raw.thread_id, sender_id: raw.sender_id, content: raw.content, is_read: raw.is_read, created_at: raw.created_at, message_type: raw.message_type, sender: { id: raw.sender_id, name: isAdmin ? "PetMatch Admin" : otherName } }];
           });
           setThreads((prev) =>
             prev.map((t) => t.id === raw.thread_id ? { ...t, last_message: raw.content, last_message_at: raw.created_at } : t)
@@ -528,6 +530,22 @@ export default function MessagesPage() {
                   let lastMineIdx = -1;
                   messages.forEach((m, i) => { if (m.sender_id === user.id) lastMineIdx = i; });
                   return messages.map((msg, idx) => {
+                    // Admin-mediated dispute messages: shown full-width and
+                    // highlighted so both parties clearly see the intervention.
+                    if (msg.message_type === "admin_note" || msg.message_type === "admin_decision") {
+                      const isDecision = msg.message_type === "admin_decision";
+                      return (
+                        <div key={msg.id} className="flex justify-center px-2">
+                          <div className={`max-w-md w-full rounded-2xl px-4 py-3 text-sm border ${isDecision ? "bg-amber-50 border-amber-300 text-amber-900" : "bg-indigo-50 border-indigo-200 text-indigo-900"}`}>
+                            <p className="text-[11px] font-bold uppercase tracking-wide mb-1 flex items-center gap-1.5">
+                              <Shield size={13} /> {isDecision ? "Admin decision" : "PetMatch Admin"}
+                            </p>
+                            <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                            <p className="text-[11px] mt-1.5 opacity-70">{timeLabel(msg.created_at)}</p>
+                          </div>
+                        </div>
+                      );
+                    }
                     const isMe = msg.sender_id === user.id;
                     const status = messageStatus(msg);
                     return (
