@@ -52,16 +52,21 @@ export async function GET(req: NextRequest) {
       .limit(100)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    // For each dispute's offer, attach any escrowed payment AND the underlying
-    // chat thread, so the admin can open the conversation straight from the tab.
+    // For each dispute, attach any escrowed payment AND the underlying chat
+    // thread, so the admin can open the conversation straight from the tab.
     const disputes = data ?? []
     const offerIds = disputes.map((d) => d.offer_id).filter(Boolean)
+
+    // Escrow + offer→thread linking (only for offer-linked disputes).
+    const offerById = new Map<string, { id: string; pet_id: string; buyer_id: string; seller_id: string }>()
+    const byOffer: Record<string, { reference: string; amount: number; status: string }> = {}
+    let offerThreads: { id: string; pet_id: string; buyer_id: string; seller_id: string }[] = []
     if (offerIds.length > 0) {
       const { data: offers } = await db
         .from("offers")
         .select("id, pet_id, buyer_id, seller_id")
         .in("id", offerIds)
-      const offerById = new Map((offers ?? []).map((o) => [o.id, o]))
+      for (const o of offers ?? []) offerById.set(o.id, o)
       const petIds = [...new Set((offers ?? []).map((o) => o.pet_id).filter(Boolean))]
 
       const { data: txs } = await db
@@ -69,21 +74,39 @@ export async function GET(req: NextRequest) {
         .select("offer_id, reference, amount, status")
         .in("offer_id", offerIds)
         .eq("status", "paid_escrow")
-      const byOffer: Record<string, { reference: string; amount: number; status: string }> = {}
       for (const t of txs ?? []) byOffer[t.offer_id] = { reference: t.reference, amount: Number(t.amount), status: t.status }
 
-      let threads: { id: string; pet_id: string; buyer_id: string; seller_id: string }[] = []
       if (petIds.length > 0) {
         const { data: th } = await db.from("message_threads").select("id, pet_id, buyer_id, seller_id").in("pet_id", petIds)
-        threads = th ?? []
+        offerThreads = th ?? []
       }
+    }
 
-      for (const d of disputes) {
-        d.escrow = d.offer_id ? byOffer[d.offer_id] ?? null : null
-        const o = d.offer_id ? offerById.get(d.offer_id) : null
-        const th = o ? threads.find((t) => t.pet_id === o.pet_id && t.buyer_id === o.buyer_id && t.seller_id === o.seller_id) : null
-        d.thread_id = th?.id ?? null
+    // Fallback: link any dispute to the conversation between its two parties
+    // (reporter/respondent, either direction) even when there is no offer.
+    const partyIds = [...new Set(disputes.flatMap((d) => [d.reporter_id, d.respondent_id]).filter(Boolean))]
+    let pairThreads: { id: string; buyer_id: string; seller_id: string }[] = []
+    if (partyIds.length > 0) {
+      const inList = `(${partyIds.join(",")})`
+      const { data: pt } = await db
+        .from("message_threads")
+        .select("id, buyer_id, seller_id, last_message_at")
+        .or(`buyer_id.in.${inList},seller_id.in.${inList}`)
+        .order("last_message_at", { ascending: false })
+      pairThreads = pt ?? []
+    }
+
+    for (const d of disputes) {
+      d.escrow = d.offer_id ? byOffer[d.offer_id] ?? null : null
+      const o = d.offer_id ? offerById.get(d.offer_id) : null
+      let th: { id: string } | undefined =
+        o ? offerThreads.find((t) => t.pet_id === o.pet_id && t.buyer_id === o.buyer_id && t.seller_id === o.seller_id) : undefined
+      if (!th) {
+        th = pairThreads.find((t) =>
+          (t.buyer_id === d.reporter_id && t.seller_id === d.respondent_id) ||
+          (t.buyer_id === d.respondent_id && t.seller_id === d.reporter_id))
       }
+      d.thread_id = th?.id ?? null
     }
     return NextResponse.json({ data: disputes })
   }
@@ -319,34 +342,44 @@ export async function PATCH(req: NextRequest) {
 
     // Return the related chat thread to normal and post the ruling INTO the chat,
     // so both parties see the admin's decision where the conflict happened.
+    // Prefer the offer-linked thread; fall back to the reporter/respondent chat.
     {
-      const { data: d2 } = await db.from("disputes").select("offer_id").eq("id", disputeId).single()
+      const { data: d2 } = await db.from("disputes").select("offer_id, reporter_id, respondent_id").eq("id", disputeId).single()
+      let threadId: string | null = null
       if (d2?.offer_id) {
         const { data: offer } = await db.from("offers").select("pet_id, buyer_id, seller_id").eq("id", d2.offer_id).single()
         if (offer) {
-          const { data: thread } = await db.from("message_threads")
-            .update({ dispute_status: "resolved" })
+          const { data: t } = await db.from("message_threads").select("id")
             .eq("pet_id", offer.pet_id).eq("buyer_id", offer.buyer_id).eq("seller_id", offer.seller_id)
-            .select("id")
             .maybeSingle()
-          if (thread) {
-            const settlementLine = settlement === "refunded"
-              ? "\n\nOutcome: the escrowed payment has been refunded to the buyer."
-              : settlement === "released"
-              ? "\n\nOutcome: the escrowed payment has been released to the seller."
-              : ""
-            const decision = `${resolution}${settlementLine}`
-            await db.from("messages").insert({
-              thread_id: thread.id,
-              sender_id: admin.id,
-              content: decision,
-              message_type: "admin_decision",
-            })
-            await db.from("message_threads")
-              .update({ last_message: "🛡️ Admin decision", last_message_at: new Date().toISOString() })
-              .eq("id", thread.id)
-          }
+          threadId = t?.id ?? null
         }
+      }
+      if (!threadId && d2?.reporter_id && d2?.respondent_id) {
+        const { data: t } = await db.from("message_threads").select("id")
+          .or(`and(buyer_id.eq.${d2.reporter_id},seller_id.eq.${d2.respondent_id}),and(buyer_id.eq.${d2.respondent_id},seller_id.eq.${d2.reporter_id})`)
+          .order("last_message_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        threadId = t?.id ?? null
+      }
+      if (threadId) {
+        await db.from("message_threads").update({ dispute_status: "resolved" }).eq("id", threadId)
+        const settlementLine = settlement === "refunded"
+          ? "\n\nOutcome: the escrowed payment has been refunded to the buyer."
+          : settlement === "released"
+          ? "\n\nOutcome: the escrowed payment has been released to the seller."
+          : ""
+        const decision = `${resolution}${settlementLine}`
+        await db.from("messages").insert({
+          thread_id: threadId,
+          sender_id: admin.id,
+          content: decision,
+          message_type: "admin_decision",
+        })
+        await db.from("message_threads")
+          .update({ last_message: "🛡️ Admin decision", last_message_at: new Date().toISOString() })
+          .eq("id", threadId)
       }
     }
 
