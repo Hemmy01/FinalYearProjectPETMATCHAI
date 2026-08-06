@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import { TrendingUp, BarChart2, Users, List, Loader2, RefreshCw, Printer, Download, Clock, Percent, Filter, ChevronDown, ChevronUp, Brain, Zap } from "lucide-react";
+import Link from "next/link";
+import { TrendingUp, BarChart2, Users, List, Loader2, RefreshCw, Printer, Download, Clock, Percent, Filter, ChevronDown, ChevronUp, Brain, Zap, FileText } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api-client";
@@ -478,43 +479,52 @@ export default function AnalyticsPage() {
       )}
 
       {/* Export */}
-      <div className="flex gap-3 print:hidden flex-wrap">
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-2 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50">
-          <Printer size={15} /> Export PDF
-        </button>
+      <div className="flex items-center gap-3 print:hidden flex-wrap">
+        <Link
+          href="/reports"
+          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
+          <FileText size={15} /> Open Reports
+        </Link>
         {seller && (
           <button
             onClick={async () => {
-              const { utils, writeFile } = await import("xlsx");
-              const rows = seller.listings.map((l) => ({
-                Pet: l.name, Breed: l.breed,
-                "Price (₦)": l.price, Views: l.views,
-                Inquiries: l.inquiries, Status: l.status,
-              }));
-              const summaryRows = [
-                { Metric: "Total Listings", Value: seller.totalListings },
-                { Metric: "Total Views", Value: seller.totalViews },
-                { Metric: "Total Inquiries", Value: seller.totalInquiries },
-                { Metric: "Pets Sold", Value: seller.totalSold },
-                { Metric: "Avg. Rating", Value: seller.avgRating },
-                { Metric: "Avg. Days to Sell", Value: seller.avgDaysToSell ?? "N/A" },
-                { Metric: "Conversion Rate (%)", Value: seller.conversionRate ?? "N/A" },
-              ];
-              const wb = utils.book_new();
-              utils.book_append_sheet(wb, utils.json_to_sheet(summaryRows), "Summary");
-              utils.book_append_sheet(wb, utils.json_to_sheet(rows), "Listings");
-              if (breeds.length > 0) {
-                const breedRows = breeds.map((b) => ({ Breed: b.breed, "Avg Price (₦)": b.avgPrice, "Listings": b.count }));
-                utils.book_append_sheet(wb, utils.json_to_sheet(breedRows), "Market Pricing");
-              }
-              writeFile(wb, `PetMatchAI_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+              const mod = await import("@/lib/pdf-report");
+              await mod.generateReport({
+                meta: {
+                  title: "My Analytics Report",
+                  subtitle: "Listing performance and market pricing overview",
+                  period: `As of ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`,
+                  scope: "Your account",
+                  preparedBy: `${user?.name ?? "Seller"} (${user?.role === "administrator" ? "Administrator" : "Seller"})`,
+                },
+                kpis: [
+                  { label: "Total Listings", value: String(seller.totalListings) },
+                  { label: "Total Views", value: seller.totalViews.toLocaleString() },
+                  { label: "Total Inquiries", value: String(seller.totalInquiries) },
+                  { label: "Pets Sold", value: String(seller.totalSold) },
+                  { label: "Avg. Rating", value: seller.avgRating > 0 ? `${seller.avgRating}/5` : "—" },
+                  { label: "Conversion", value: seller.conversionRate !== null ? `${seller.conversionRate}%` : "—" },
+                ],
+                table: {
+                  columns: [
+                    { header: "Pet" }, { header: "Breed" }, { header: "Price", align: "right" },
+                    { header: "Views", align: "right" }, { header: "Inquiries", align: "right" }, { header: "Status", align: "center" },
+                  ],
+                  rows: seller.listings.map((l) => [l.name, l.breed, mod.money(l.price), l.views ?? 0, l.inquiries ?? 0, l.status]),
+                },
+                emptyNote: "You have no listings yet.",
+                fileName: `PetMatchAI_My_Analytics_${new Date().toISOString().slice(0, 10)}.pdf`,
+              });
             }}
-            className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
-            <Download size={15} /> Export Excel
+            className="flex items-center gap-2 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50">
+            <Download size={15} /> Download PDF
           </button>
         )}
+        <button
+          onClick={() => window.print()}
+          className="flex items-center gap-2 border border-gray-300 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50">
+          <Printer size={15} /> Print View
+        </button>
       </div>
 
       {/* Custom Report Builder */}
@@ -600,21 +610,45 @@ export default function AnalyticsPage() {
               {reportData && reportData.length > 0 && (
                 <button
                   onClick={async () => {
-                    const { utils, writeFile } = await import("xlsx");
-                    const rows = reportData.map((r) => ({
-                      "Pet Name": r.name, Breed: r.breed, Species: r.species,
-                      "Price (₦)": r.price, Views: r.views ?? 0,
-                      Inquiries: r.inquiries ?? 0, Status: r.status,
-                      "Seller": (r.seller as any)?.name ?? "",
-                      "Listed On": r.created_at ? new Date(r.created_at).toLocaleDateString() : "",
-                    }));
-                    const ws = utils.json_to_sheet(rows);
-                    const wb = utils.book_new();
-                    utils.book_append_sheet(wb, ws, "Custom Report");
-                    writeFile(wb, `PetMatchAI_Custom_${reportFrom}_to_${reportTo}.xlsx`);
+                    const mod = await import("@/lib/pdf-report");
+                    const fmt = (d: string) => new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+                    await mod.generateReport({
+                      meta: {
+                        title: "Custom Listings Report",
+                        subtitle: "Filtered listing performance",
+                        period: `${fmt(reportFrom)}  to  ${fmt(reportTo)}`,
+                        scope: isAdmin ? "Platform-wide" : "Your account",
+                        preparedBy: `${user?.name ?? "User"} (${isAdmin ? "Administrator" : "Seller"})`,
+                        filters: [
+                          `Species: ${reportSpecies || "All"}`,
+                          `Status: ${reportStatus}`,
+                          `Sorted by: ${reportSort}`,
+                        ],
+                      },
+                      kpis: reportSummary ? [
+                        { label: "Total Pets", value: String(reportSummary.totalPets) },
+                        { label: "Total Views", value: reportSummary.totalViews.toLocaleString() },
+                        { label: "Total Inquiries", value: String(reportSummary.totalInquiries) },
+                        { label: "Avg Price", value: mod.money(reportSummary.avgPrice) },
+                      ] : [],
+                      table: {
+                        columns: [
+                          { header: "Pet" }, { header: "Breed" }, { header: "Species", align: "center" },
+                          { header: "Price", align: "right" }, { header: "Views", align: "right" },
+                          { header: "Inquiries", align: "right" }, { header: "Status", align: "center" },
+                          { header: "Seller" }, { header: "Listed On", align: "center" },
+                        ],
+                        rows: reportData.map((r) => [
+                          r.name, r.breed, r.species, mod.money(r.price), r.views ?? 0,
+                          r.inquiries ?? 0, r.status, (r.seller as any)?.name ?? "—",
+                          r.created_at ? fmt(r.created_at) : "—",
+                        ]),
+                      },
+                      fileName: `PetMatchAI_Custom_${reportFrom}_to_${reportTo}.pdf`,
+                    });
                   }}
                   className="flex items-center gap-1.5 border border-gray-300 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50">
-                  <Download size={14} /> Export CSV
+                  <Download size={14} /> Download PDF
                 </button>
               )}
             </div>

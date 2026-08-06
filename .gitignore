@@ -44,6 +44,9 @@ next-env.d.ts
 client_secret_*.json
 .test_token.txt
 
+# client source documents (the report assets are extracted into public/)
+letterhead*.pdf
+
 # local agent/editor config
 .claude/
 

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, MessageSquare, Home, Search, Heart, BarChart2, Shield, User, PlusCircle, Zap, LogOut, Menu, X, Tag, Bookmark, Megaphone } from "lucide-react";
+import { Bell, MessageSquare, Home, Search, Heart, BarChart2, Shield, User, PlusCircle, Zap, LogOut, Menu, X, Tag, Bookmark, Megaphone, FileText } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
@@ -16,6 +16,7 @@ const buyerLinks = [
   { href: "/offers", label: "Offers", icon: Tag },
   { href: "/messages", label: "Messages", icon: MessageSquare },
   { href: "/want-ads", label: "Wants", icon: Megaphone },
+  { href: "/reports", label: "Reports", icon: FileText },
 ];
 
 const sellerLinks = [
@@ -25,12 +26,14 @@ const sellerLinks = [
   { href: "/offers", label: "Offers", icon: Tag },
   { href: "/messages", label: "Messages", icon: MessageSquare },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
+  { href: "/reports", label: "Reports", icon: FileText },
 ];
 
 const adminLinks = [
   { href: "/dashboard/admin", label: "Home", icon: Home },
   { href: "/admin", label: "Admin", icon: Shield },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
+  { href: "/reports", label: "Reports", icon: FileText },
   { href: "/messages", label: "Messages", icon: MessageSquare },
 ];
 
